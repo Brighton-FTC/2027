@@ -1,10 +1,6 @@
 package org.firstinspires.ftc.teamcode.Turret;
 
 
-import com.acmerobotics.dashboard.FtcDashboard;
-import com.acmerobotics.dashboard.config.Config;
-import com.acmerobotics.dashboard.telemetry.MultipleTelemetry;
-import com.arcrobotics.ftclib.controller.PIDController;
 import com.arcrobotics.ftclib.controller.PIDFController;
 import com.arcrobotics.ftclib.hardware.motors.Motor;
 import com.bylazar.configurables.annotations.Configurable;
@@ -18,12 +14,10 @@ import org.firstinspires.ftc.robotcore.external.navigation.YawPitchRollAngles;
 
 
 import com.pedropathing.follower.Follower;
-import com.pedropathing.geometry.Pose;
 
 import org.firstinspires.ftc.teamcode.AprilTag.AprilTagLocalization;
 
 
-@Config
 @Configurable
 public class TurretPIDComponent {
 
@@ -48,7 +42,7 @@ public class TurretPIDComponent {
 
     private double objectYPosition;
     private Motor turretMotor;
-    private final MultipleTelemetry telemetry;
+    private final Telemetry telemetry;
 
     private AprilTagLocalization camera;
     private Position cameraPosition = new Position(DistanceUnit.INCH,
@@ -70,8 +64,7 @@ public class TurretPIDComponent {
         this.objectXPosition = objectXPosition;
         this.objectYPosition = objectYPosition;
         this.scalingFactor = scalingFactor;
-        FtcDashboard dashboard = FtcDashboard.getInstance();
-        this.telemetry = new MultipleTelemetry(telemetry, dashboard.getTelemetry());
+        this.telemetry = telemetry;
 
 //        follower = Constants.createFollower(hardwareMap);
 //        follower.setStartingPose(startingPose == null ? new Pose() : startingPose);

@@ -5,21 +5,20 @@ import com.arcrobotics.ftclib.gamepad.GamepadKeys;
 import com.bylazar.configurables.annotations.Configurable;
 import com.bylazar.telemetry.PanelsTelemetry;
 import com.bylazar.telemetry.TelemetryManager;
+import com.pedropathing.drivetrain.DrivePowers;
 import com.pedropathing.follower.Follower;
-import com.pedropathing.geometry.Pose;
-import com.pedropathing.paths.PathChain;
+import com.pedropathing.follower.ManualDrive;
+import com.pedropathing.math.Pose;
 import com.qualcomm.robotcore.eventloop.opmode.OpMode;
 import com.qualcomm.robotcore.eventloop.opmode.TeleOp;
 
 import org.firstinspires.ftc.teamcode.FlyWheel.DynamicAngleComponent;
 import org.firstinspires.ftc.teamcode.FlyWheel.FlyWheelMotorComponent;
+import org.firstinspires.ftc.teamcode.FlyWheel.ServoKickComponent;
 import org.firstinspires.ftc.teamcode.IntakeMotorComponent;
 import org.firstinspires.ftc.teamcode.PSButtons;
-import org.firstinspires.ftc.teamcode.ServoKick.ServoKickComponent;
 import org.firstinspires.ftc.teamcode.Turret.TurretPIDComponent;
-import org.firstinspires.ftc.teamcode.pedroPathing.Constants;
-
-import java.util.function.Supplier;
+import org.firstinspires.ftc.teamcode.pedro.Constants;
 
 
 /*  FOLLOWING THE PRINCIPLES OF DRY (DON'T REPEAT YOURSELF),
@@ -68,7 +67,7 @@ public abstract class GenericTeleop extends OpMode {
     @Override
     public void init() {
         follower = Constants.createFollower(hardwareMap);
-        follower.setStartingPose(startingPose == null ? new Pose() : startingPose);
+        follower.setPose(startingPose == null ? Pose.zero() : startingPose);
         follower.update();
         telemetryManager = PanelsTelemetry.INSTANCE.getTelemetry();
 //
@@ -89,7 +88,9 @@ public abstract class GenericTeleop extends OpMode {
 
     @Override
     public void start() {
-        follower.startTeleopDrive();
+        // Pedro 3.0 enters manual drive mode on the first follower.manual() call;
+        // just make sure localization is seeded before driver control begins.
+        follower.update();
     }
 
     @Override
@@ -101,36 +102,19 @@ public abstract class GenericTeleop extends OpMode {
 
         if (!automatedDrive) {
 
-            if(driveFieldCentric) {
-                if (!slowMode) follower.setTeleOpDrive(
-                        gamepadEx1.getLeftY(),
-                        -gamepadEx1.getLeftX(),
-                        -gamepadEx1.getRightX() * slowModeMultiplier,
-                        false
-                );
+            double scale = slowMode ? slowModeMultiplier : 1.0;
+            double forward = gamepadEx1.getLeftY() * scale;
+            double lateral = -gamepadEx1.getLeftX() * scale;
+            double turn = -gamepadEx1.getRightX() * scale;
 
-                else follower.setTeleOpDrive(
-                        gamepadEx1.getLeftY(),
-                        -gamepadEx1.getLeftX(),
-                        -gamepadEx1.getRightX() * slowModeMultiplier,
-                        false
-                );
-            }
-            else {
-                if (!slowMode) follower.setTeleOpDrive(
-                        gamepadEx1.getLeftY(),
-                        -gamepadEx1.getLeftX(),
-                        -gamepadEx1.getRightX(),
-                        true
-                );
-
-                else follower.setTeleOpDrive(
-                        gamepadEx1.getLeftY() * slowModeMultiplier,
-
-                        -gamepadEx1.getLeftX() * slowModeMultiplier,
-                        -gamepadEx1.getRightX() * slowModeMultiplier,
-                        true
-                );
+            if (driveFieldCentric) {
+                // Field-centric: rotate driver inputs by the robot's current heading.
+                DrivePowers powers = ManualDrive.fieldCentric(
+                        forward, lateral, turn, follower.pose().heading());
+                follower.manual(powers);
+            } else {
+                // Robot-centric.
+                follower.manual(forward, lateral, turn);
             }
 
             if (gamepadEx1.wasJustPressed(GamepadKeys.Button.LEFT_BUMPER)&&!aim) {
@@ -139,7 +123,7 @@ public abstract class GenericTeleop extends OpMode {
                 aim = false;
             }
             if (aim){
-                turret.aimToObject(follower.getPose().getX(), follower.getPose().getY(), follower.getHeading());
+                turret.aimToObject(follower.pose().x(), follower.pose().y(), follower.pose().heading());
             }
 
             if (gamepadEx1.wasJustPressed(GamepadKeys.Button.RIGHT_BUMPER)) {
@@ -159,7 +143,7 @@ public abstract class GenericTeleop extends OpMode {
                 shooting = !shooting;
             }
             if (shooting){
-                launcher.dynamicMotorPower(follower.getPose().getX(), follower.getPose().getY());
+                launcher.dynamicMotorPower(follower.pose().x(), follower.pose().y());
             }
 //
 //
@@ -222,8 +206,8 @@ public abstract class GenericTeleop extends OpMode {
         }
 
         telemetry.addData("rpm", launcher.getRPM());
-        telemetryManager.debug("position", follower.getPose());
-        telemetryManager.debug("velocity", follower.getVelocity());
+        telemetryManager.debug("position", follower.pose());
+        telemetryManager.debug("velocity", follower.velocity());
         telemetryManager.debug("automatedDrive", automatedDrive);
     }
 }

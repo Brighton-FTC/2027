@@ -1,12 +1,9 @@
 package org.firstinspires.ftc.teamcode.FlyWheel;
 
 
-import com.acmerobotics.dashboard.FtcDashboard;
-import com.acmerobotics.dashboard.config.Config;
-import com.acmerobotics.dashboard.telemetry.MultipleTelemetry;
 import com.bylazar.configurables.annotations.Configurable;
 import com.pedropathing.follower.Follower;
-import com.pedropathing.geometry.Pose;
+import com.pedropathing.math.Pose;
 import com.qualcomm.robotcore.hardware.HardwareMap;
 import com.qualcomm.robotcore.hardware.Servo;
 
@@ -16,12 +13,10 @@ import org.firstinspires.ftc.robotcore.external.navigation.DistanceUnit;
 import org.firstinspires.ftc.robotcore.external.navigation.Position;
 import org.firstinspires.ftc.robotcore.external.navigation.YawPitchRollAngles;
 import org.firstinspires.ftc.teamcode.AprilTag.AprilTagLocalization;
-import org.firstinspires.ftc.teamcode.pedroPathing.Constants;
 
 import java.lang.Math;
 
 
-@Config
 @Configurable
 public class DynamicAngleComponent {
 
@@ -58,7 +53,6 @@ public class DynamicAngleComponent {
         this.objectHeight = objectHeight;
         this.flyWheelRadius = flyWheelRadius;
         this.efficiency = efficiency;
-        telemetry = new MultipleTelemetry(telemetry, FtcDashboard.getInstance().getTelemetry());
 
 //        follower = Constants.createFollower(hardwareMap);
 //        follower.setStartingPose(startingPose == null ? new Pose() : startingPose);

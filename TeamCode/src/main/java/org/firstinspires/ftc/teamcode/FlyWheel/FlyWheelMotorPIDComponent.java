@@ -1,6 +1,5 @@
 package org.firstinspires.ftc.teamcode.FlyWheel;
 
-import com.acmerobotics.dashboard.config.Config;
 import com.arcrobotics.ftclib.controller.PIDController;
 import com.arcrobotics.ftclib.controller.PIDFController;
 import com.arcrobotics.ftclib.controller.wpilibcontroller.SimpleMotorFeedforward;
@@ -8,7 +7,6 @@ import com.arcrobotics.ftclib.hardware.motors.Motor;
 import com.bylazar.configurables.annotations.Configurable;
 import com.qualcomm.robotcore.hardware.HardwareMap;
 
-@Config
 @Configurable
 public class FlyWheelMotorPIDComponent {
 
