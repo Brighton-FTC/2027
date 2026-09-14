@@ -30,6 +30,8 @@ public class TurretPIDComponent {
 
     public static double kF = 0.0;
 
+    public static double MAX_TURRET_ANGLE_DEGREES = 90.0;
+
     private double lastTurretAngle = 0;
 
     private double turretGlobalAngle = 0;
@@ -93,7 +95,14 @@ public class TurretPIDComponent {
         controller.setPIDF(kP, kI, kD, kF);
 
         double currentPosition = turretMotor.getCurrentPosition();
-        double TARGET_TICK_VALUE = angleToEncoderTicks(degrees) + currentPosition;
+        double currentAngle = encoderTicksToAngle((int) currentPosition);
+        double targetAngle = currentAngle + degrees;
+
+        // Hard clamp: never command the turret beyond ±MAX_TURRET_ANGLE_DEGREES.
+        double limit = Math.abs(MAX_TURRET_ANGLE_DEGREES);
+        targetAngle = Math.max(-limit, Math.min(limit, targetAngle));
+
+        double TARGET_TICK_VALUE = angleToEncoderTicks(targetAngle);
         controller.setSetPoint(TARGET_TICK_VALUE);
         double power = controller.calculate(currentPosition);
 
@@ -104,6 +113,12 @@ public class TurretPIDComponent {
     }
 
 
+
+    private double normalizeAngle180(double angle) {
+        while (angle > 180) angle -= 360;
+        while (angle <= -180) angle += 360;
+        return angle;
+    }
 
     public void aimToObject(double robotX, double robotY, double robotHeading) {
         if (robotX != 1000 && robotY != 1000) {
@@ -120,15 +135,19 @@ public class TurretPIDComponent {
             turretGlobalAngle += delta;
             lastTurretAngle = turretAngle;
 
-            double toTurn = destinationAngle - (turretAngle + robotAngle);
+            // Desired turret angle relative to the robot, wrapped to [-180, 180].
+            double rawRelative = normalizeAngle180(destinationAngle - robotAngle);
 
-            if (Math.abs(turretGlobalAngle+toTurn) >= 180 && toTurn > 0){
-                toTurn-=360;
-            }else if (Math.abs(turretGlobalAngle+toTurn) >= 180 && toTurn < 0){
-                toTurn+=360;
-            }
+            // Clamp to ±90°. If the goal is behind the robot, hold at the
+            // nearest limit (+90 or -90) until the robot rotates back into range.
+            double limit = Math.abs(MAX_TURRET_ANGLE_DEGREES);
+            double clampedRelative = Math.max(-limit, Math.min(limit, rawRelative));
+
+            double toTurn = clampedRelative - turretAngle;
 
             telemetry.addData("To turn :", toTurn);
+            telemetry.addData("raw relative", rawRelative);
+            telemetry.addData("clamped relative", clampedRelative);
             telemetry.addData("error", encoderTicksToAngle((int) controller.getPositionError()));
             telemetry.addData("destination", destinationAngle);
             telemetry.addData("current angle", turretAngle);
