@@ -3,9 +3,13 @@ package org.firstinspires.ftc.teamcode;
 import com.arcrobotics.ftclib.gamepad.GamepadKeys;
 
 /**
- * Gamepad buttons referred to by their PlayStation names. For other buttons, please see {@link GamepadKeys.Button}
+ * Gamepad buttons referred to by their PlayStation names.
+ * For sticks, bumpers, D-pad, etc. see {@link GamepadKeys.Button}.
  */
-public class PSButtons {
+public final class PSButtons {
+
+    private PSButtons() {}
+
     public static final GamepadKeys.Button SQUARE = GamepadKeys.Button.X;
     public static final GamepadKeys.Button TRIANGLE = GamepadKeys.Button.Y;
     public static final GamepadKeys.Button CIRCLE = GamepadKeys.Button.B;

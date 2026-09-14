@@ -2,7 +2,6 @@ package org.firstinspires.ftc.teamcode.TeleOp;
 
 import com.arcrobotics.ftclib.gamepad.GamepadEx;
 import com.arcrobotics.ftclib.gamepad.GamepadKeys;
-import com.bylazar.configurables.annotations.Configurable;
 import com.bylazar.telemetry.PanelsTelemetry;
 import com.bylazar.telemetry.TelemetryManager;
 import com.pedropathing.drivetrain.DrivePowers;
@@ -10,7 +9,6 @@ import com.pedropathing.follower.Follower;
 import com.pedropathing.follower.ManualDrive;
 import com.pedropathing.math.Pose;
 import com.qualcomm.robotcore.eventloop.opmode.OpMode;
-import com.qualcomm.robotcore.eventloop.opmode.TeleOp;
 
 import org.firstinspires.ftc.teamcode.FlyWheel.DynamicAngleComponent;
 import org.firstinspires.ftc.teamcode.FlyWheel.FlyWheelMotorComponent;
@@ -18,196 +16,246 @@ import org.firstinspires.ftc.teamcode.FlyWheel.ServoKickComponent;
 import org.firstinspires.ftc.teamcode.IntakeMotorComponent;
 import org.firstinspires.ftc.teamcode.PSButtons;
 import org.firstinspires.ftc.teamcode.Turret.TurretPIDComponent;
+import org.firstinspires.ftc.teamcode.config.RobotConfig;
 import org.firstinspires.ftc.teamcode.pedro.Constants;
 
-
-/*  FOLLOWING THE PRINCIPLES OF DRY (DON'T REPEAT YOURSELF),
-    Code is modified to have an abstract generic teleop class.
-    Any instance-specific variables MUST go into abstract functions
+/**
+ * Shared TeleOp implementation. Subclasses only provide the alliance-specific
+ * goal X and starting pose — all tuning lives in {@link RobotConfig}.
+ *
+ * <p>Controls (gamepad1 = drive + shooter, gamepad2 = intake/transfer/kicker):
+ * <ul>
+ *   <li>Left stick: drive/strafe, right stick X: turn.</li>
+ *   <li>RIGHT_BUMPER: slow-mode toggle. SQUARE: field/robot-centric toggle.</li>
+ *   <li>LEFT_BUMPER: turret auto-aim toggle. CIRCLE (gp1): shooter toggle.</li>
+ *   <li>CIRCLE (gp2): intake toggle. TRIANGLE (gp2): reverse intake+transfer toggle.</li>
+ *   <li>CROSS (gp2): transfer toggle. DPAD_LEFT (gp1): intake+transfer+kicker combo.</li>
+ *   <li>DPAD_UP/DOWN (gp2): kicker open/close.</li>
+ * </ul>
  */
-
-@Configurable
-@TeleOp
 public abstract class GenericTeleop extends OpMode {
-    public Follower follower;
-    private boolean shooting = false;
 
-    private boolean driveFieldCentric = false;
+    protected Follower follower;
+    protected TelemetryManager panels;
 
-    private boolean intaking = false;
+    private GamepadEx gp1;
+    private GamepadEx gp2;
 
-    private boolean transfering = false;
-
-    private boolean aim = false;
-
-    private boolean opened = false;
-
-
-    private GamepadEx gamepadEx1;
-    private GamepadEx gamepadEx2;
-    public final Pose startingPose = getStartingPose();
-    private boolean automatedDrive = false;
     private TurretPIDComponent turret;
-
-    private ServoKickComponent cap;
-
-    private FlyWheelMotorComponent transfer;
     private DynamicAngleComponent launcher;
-//    private FlyWheelMotorComponent launcher;
-
+    private FlyWheelMotorComponent transfer;
+    private ServoKickComponent kicker;
     private IntakeMotorComponent intake;
-    private TelemetryManager telemetryManager;
+
+    private Pose startingPose;
+
+    // Toggle state — each flag mirrors its mechanism, applied immediately.
     private boolean slowMode = false;
-    private double slowModeMultiplier = 0.25;
+    private boolean fieldCentric;
+    private boolean aiming = false;
+    private boolean shooting = false;
+    private boolean intakeRunning = false;
+    private boolean transferRunning = false;
 
-    protected abstract double getObjectXPosition();
+    /** Goal X in inches (field frame). Y/height come from {@link RobotConfig}. */
+    protected abstract double getGoalX();
 
+    /** Where localization is seeded at init. */
     protected abstract Pose getStartingPose();
 
     @Override
     public void init() {
+        fieldCentric = RobotConfig.Drive.FIELD_CENTRIC_DEFAULT;
+        startingPose = getStartingPose();
+
         follower = Constants.createFollower(hardwareMap);
         follower.setPose(startingPose == null ? Pose.zero() : startingPose);
         follower.update();
-        telemetryManager = PanelsTelemetry.INSTANCE.getTelemetry();
-//
-        turret = new TurretPIDComponent(hardwareMap, "turretMotor", 0.167, getObjectXPosition(), 144, telemetry);
-        launcher = new DynamicAngleComponent(hardwareMap, "servo", getObjectXPosition(), 144, 42,1.9, 1, startingPose, telemetry);
-//        launcher = new FlyWheelMotorComponent(hardwareMap, "flyWheelMotor");
-        transfer = new FlyWheelMotorComponent(hardwareMap, "transferMotor");
 
-        cap = new ServoKickComponent(hardwareMap, "launchCap");
-//
-        intake = new IntakeMotorComponent(hardwareMap, "intakeMotor");
+        panels = PanelsTelemetry.INSTANCE.getTelemetry();
 
-        gamepadEx1 = new GamepadEx(gamepad1);
-        gamepadEx2 = new GamepadEx(gamepad2);
+        double goalX = getGoalX();
+        double goalY = RobotConfig.Field.GOAL_Y;
+
+        turret = new TurretPIDComponent(
+                hardwareMap,
+                RobotConfig.Hardware.TURRET_MOTOR,
+                RobotConfig.Turret.DEGREES_PER_TICK,
+                goalX, goalY,
+                telemetry);
+        launcher = new DynamicAngleComponent(
+                hardwareMap,
+                RobotConfig.Hardware.FLYWHEEL_MOTOR,
+                goalX, goalY,
+                RobotConfig.Field.GOAL_HEIGHT);
+        transfer = new FlyWheelMotorComponent(hardwareMap, RobotConfig.Hardware.TRANSFER_MOTOR);
+        kicker = new ServoKickComponent(hardwareMap, RobotConfig.Hardware.LAUNCH_CAP_SERVO);
+        intake = new IntakeMotorComponent(hardwareMap, RobotConfig.Hardware.INTAKE_MOTOR);
+
+        gp1 = new GamepadEx(gamepad1);
+        gp2 = new GamepadEx(gamepad2);
 
         turret.resetTurretEncoder();
     }
 
     @Override
     public void start() {
-        // Pedro 3.0 enters manual drive mode on the first follower.manual() call;
-        // just make sure localization is seeded before driver control begins.
         follower.update();
     }
 
     @Override
     public void loop() {
         follower.update();
-        gamepadEx1.readButtons();
-        gamepadEx2.readButtons();
-        telemetryManager.update();
+        gp1.readButtons();
+        gp2.readButtons();
 
-        if (!automatedDrive) {
+        handleDrive();
+        handleAim();
+        handleShooter();
+        handleIntakeAndTransfer();
+        handleKicker();
+        reportTelemetry();
 
-            double scale = slowMode ? slowModeMultiplier : 1.0;
-            double forward = gamepadEx1.getLeftY() * scale;
-            double lateral = -gamepadEx1.getLeftX() * scale;
-            double turn = -gamepadEx1.getRightX() * scale;
+        panels.update();
+        telemetry.update();
+    }
 
-            if (driveFieldCentric) {
-                // Field-centric: rotate driver inputs by the robot's current heading.
-                DrivePowers powers = ManualDrive.fieldCentric(
-                        forward, lateral, turn, follower.pose().heading());
-                follower.manual(powers);
-            } else {
-                // Robot-centric.
-                follower.manual(forward, lateral, turn);
-            }
+    // ---- drive ----
 
-            if (gamepadEx1.wasJustPressed(GamepadKeys.Button.LEFT_BUMPER)&&!aim) {
-                aim = true;
-            }else if (gamepadEx1.wasJustPressed(GamepadKeys.Button.LEFT_BUMPER)&&aim){
-                aim = false;
-            }
-            if (aim){
-                turret.aimToObject(follower.pose().x(), follower.pose().y(), follower.pose().heading());
-            }
+    private void handleDrive() {
+        double scale = slowMode ? RobotConfig.Drive.SLOW_MODE_MULTIPLIER : 1.0;
+        double forward = gp1.getLeftY() * scale;
+        double strafe = -gp1.getLeftX() * scale;
+        double turn = -gp1.getRightX() * scale;
 
-            if (gamepadEx1.wasJustPressed(GamepadKeys.Button.RIGHT_BUMPER)) {
-                slowMode = !slowMode;
-            }
-//            if(gamepadEx1.wasJustPressed(PSButtons.SQUARE)){
-//                driveFieldCentric = !driveFieldCentric;
-//            }
-//
-            if (gamepadEx1.wasJustPressed(PSButtons.CIRCLE) && !shooting) {
-//                launcher.runMotorAt(1);
-                shooting = true;
-            }
-            else if (gamepadEx1.wasJustPressed(PSButtons.CIRCLE)&& shooting){
-//                launcher.stopMotor();
-                launcher.stop();
-                shooting = !shooting;
-            }
-            if (shooting){
-                launcher.dynamicMotorPower(follower.pose().x(), follower.pose().y());
-            }
-//
-//
-//            if (gamepadEx1.wasJustPressed(PSButtons.CROSS)&&!intaking){
-//                intake.startMotor();
-//                transfer.runMotorAt(1);
-//                intaking = !intaking;
-//            }
-//            else if (gamepadEx1.wasJustPressed(PSButtons.CROSS)&&intaking){
-//                intake.stopMotor();
-//                transfer.stopMotor();
-//                intaking = !intaking;
-//            }
-
-            if (gamepadEx2.wasJustPressed(PSButtons.TRIANGLE)&&!intaking){
-                intake.reverseMotor();
-                transfer.runMotorAt(-0.5);
-                intaking = !intaking;
-            }
-            else if(gamepadEx2.wasJustPressed(PSButtons.TRIANGLE)&&intaking){
-                intake.stopMotor();
-                transfer.stopMotor();
-                intaking = !intaking;
-            }
-
-            if(gamepadEx2.wasJustPressed(PSButtons.CROSS)&&!transfering){
-                transfer.runMotorAt(0.5);
-                transfering = !transfering;
-            }else if(gamepadEx2.wasJustPressed(PSButtons.CROSS)&&transfering){
-                transfer.stopMotor();
-                transfering = !transfering;
-            }
-            if(gamepadEx2.wasJustPressed(PSButtons.CIRCLE)&&!intaking){
-                intake.startMotor();
-                intaking = !intaking;
-            }else if(intaking&&gamepadEx2.wasJustPressed(PSButtons.CIRCLE)){
-                intaking = !intaking;
-                intake.stopMotor();
-            }
-
-
-            if(gamepadEx2.wasJustPressed(GamepadKeys.Button.DPAD_UP)){
-                cap.open();
-            }
-            if(gamepadEx2.wasJustPressed(GamepadKeys.Button.DPAD_DOWN)){
-                cap.close();
-            }
-            if(gamepadEx1.wasJustPressed(GamepadKeys.Button.DPAD_LEFT)&&!intaking){
-                intake.startMotor();
-                transfer.runMotorAt(0.5);
-                cap.open();
-                intaking = !intaking;
-            }else if(gamepadEx1.wasJustPressed(GamepadKeys.Button.DPAD_LEFT)&&intaking){
-                intake.stopMotor();
-                transfer.stopMotor();
-                cap.close();
-                intaking = !intaking;
-            }
-//
+        if (fieldCentric) {
+            DrivePowers powers = ManualDrive.fieldCentric(
+                    forward, strafe, turn, follower.pose().heading());
+            follower.manual(powers);
+        } else {
+            follower.manual(forward, strafe, turn);
         }
 
-        telemetry.addData("rpm", launcher.getRPM());
-        telemetryManager.debug("position", follower.pose());
-        telemetryManager.debug("velocity", follower.velocity());
-        telemetryManager.debug("automatedDrive", automatedDrive);
+        if (gp1.wasJustPressed(GamepadKeys.Button.RIGHT_BUMPER)) {
+            slowMode = !slowMode;
+        }
+        if (gp1.wasJustPressed(PSButtons.SQUARE)) {
+            fieldCentric = !fieldCentric;
+        }
+    }
+
+    // ---- turret + shooter ----
+
+    private void handleAim() {
+        if (gp1.wasJustPressed(GamepadKeys.Button.LEFT_BUMPER)) {
+            aiming = !aiming;
+        }
+        if (aiming) {
+            turret.aimToObject(poseX(), poseY(), poseHeading());
+        }
+    }
+
+    private void handleShooter() {
+        if (gp1.wasJustPressed(PSButtons.CIRCLE)) {
+            shooting = !shooting;
+            if (!shooting) {
+                launcher.stop();
+            }
+        }
+        if (shooting) {
+            launcher.dynamicMotorPower(poseX(), poseY());
+        }
+    }
+
+    // ---- intake / transfer / kicker ----
+
+    private void handleIntakeAndTransfer() {
+        // Reverse intake + reverse transfer (unclog).
+        if (gp2.wasJustPressed(PSButtons.TRIANGLE)) {
+            if (intakeRunning || transferRunning) {
+                intake.stopMotor();
+                transfer.stopMotor();
+                intakeRunning = false;
+                transferRunning = false;
+            } else {
+                intake.reverseMotor();
+                transfer.runMotorAt(RobotConfig.Transfer.REVERSE_POWER);
+                intakeRunning = true;
+                transferRunning = true;
+            }
+        }
+
+        // Transfer roller alone.
+        if (gp2.wasJustPressed(PSButtons.CROSS)) {
+            transferRunning = !transferRunning;
+            if (transferRunning) {
+                transfer.runMotorAt(RobotConfig.Transfer.FORWARD_POWER);
+            } else {
+                transfer.stopMotor();
+            }
+        }
+
+        // Intake roller alone.
+        if (gp2.wasJustPressed(PSButtons.CIRCLE)) {
+            intakeRunning = !intakeRunning;
+            if (intakeRunning) {
+                intake.startMotor();
+            } else {
+                intake.stopMotor();
+            }
+        }
+
+        // Combo: intake + transfer + kicker open (one-button collect-and-feed).
+        if (gp1.wasJustPressed(GamepadKeys.Button.DPAD_LEFT)) {
+            if (intakeRunning || transferRunning) {
+                intake.stopMotor();
+                transfer.stopMotor();
+                kicker.close();
+                intakeRunning = false;
+                transferRunning = false;
+            } else {
+                intake.startMotor();
+                transfer.runMotorAt(RobotConfig.Transfer.FORWARD_POWER);
+                kicker.open();
+                intakeRunning = true;
+                transferRunning = true;
+            }
+        }
+    }
+
+    private void handleKicker() {
+        if (gp2.wasJustPressed(GamepadKeys.Button.DPAD_UP)) {
+            kicker.open();
+        }
+        if (gp2.wasJustPressed(GamepadKeys.Button.DPAD_DOWN)) {
+            kicker.close();
+        }
+    }
+
+    // ---- telemetry ----
+
+    private void reportTelemetry() {
+        telemetry.addData("Shooter RPM (target)", launcher.getRPM());
+        telemetry.addData("Turret deg", turret.getCurrentAngle());
+        telemetry.addData("Aiming", aiming);
+        telemetry.addData("Shooting", shooting);
+        telemetry.addData("Slow mode", slowMode);
+        telemetry.addData("Field centric", fieldCentric);
+        telemetry.addData("Intake", intakeRunning);
+        telemetry.addData("Transfer", transferRunning);
+        panels.debug("position", follower.pose());
+        panels.debug("velocity", follower.velocity());
+    }
+
+    private double poseX() {
+        return follower.pose().x();
+    }
+
+    private double poseY() {
+        return follower.pose().y();
+    }
+
+    private double poseHeading() {
+        return follower.pose().heading();
     }
 }

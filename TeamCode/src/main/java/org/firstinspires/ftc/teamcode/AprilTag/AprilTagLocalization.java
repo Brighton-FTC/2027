@@ -1,7 +1,7 @@
 package org.firstinspires.ftc.teamcode.AprilTag;
+
 import android.util.Size;
 
-import com.bylazar.configurables.annotations.Configurable;
 import com.qualcomm.robotcore.hardware.HardwareMap;
 
 import org.firstinspires.ftc.robotcore.external.Telemetry;
@@ -10,6 +10,7 @@ import org.firstinspires.ftc.robotcore.external.navigation.AngleUnit;
 import org.firstinspires.ftc.robotcore.external.navigation.DistanceUnit;
 import org.firstinspires.ftc.robotcore.external.navigation.Position;
 import org.firstinspires.ftc.robotcore.external.navigation.YawPitchRollAngles;
+import org.firstinspires.ftc.teamcode.config.RobotConfig;
 import org.firstinspires.ftc.vision.VisionPortal;
 import org.firstinspires.ftc.vision.apriltag.AprilTagClusterDetection;
 import org.firstinspires.ftc.vision.apriltag.AprilTagDetection;
@@ -18,95 +19,86 @@ import org.firstinspires.ftc.vision.apriltag.AprilTagProcessor;
 import org.firstinspires.ftc.vision.apriltag.AprilTagSingleDetection;
 
 import java.util.List;
+import java.util.Objects;
 
 /**
- * AprilTag-based localization, updated for FTC SDK 12.0 (2026-2027 BIOBUZZ season).
+ * AprilTag-based localization (FTC SDK 12.0 / BIOBUZZ season).
  *
- * <p>SDK 12.0 breaking change: {@link AprilTagDetection} is now a base class. Concrete
- * detections are either {@link AprilTagSingleDetection} (standalone tag, carries
- * {@code id}/{@code metadata}/{@code center}) or {@link AprilTagClusterDetection}
- * (co-planar tag group, carries cluster {@code metadata}). Code must {@code instanceof}
- * check before accessing those fields. See
- * https://ftc-docs.firstinspires.org/apriltag-clusters
+ * <p>SDK 12.0 breaking change: {@link AprilTagDetection} is a base class.
+ * Concrete detections are {@link AprilTagSingleDetection} or
+ * {@link AprilTagClusterDetection} — always {@code instanceof}-check before
+ * reading id/metadata/center.
  *
- * <p>NOTE (per SDK 12.0 release notes): BIOBUZZ AprilTags move, so they are not suitable
- * for absolute field localization. The helpers below return robot-pose estimates derived
- * from visible tags/clusters (best used for aiming), or 1000 when no usable pose exists.
+ * <p>BIOBUZZ tags move, so they are not suitable for absolute field
+ * localization. Use these helpers for aiming; they return
+ * {@link RobotConfig.Launcher#UNKNOWN_POSE} when no solvable pose exists.
+ *
+ * <p>This class never calls {@code telemetry.update()} — the OpMode owns it.
+ * Call {@link #close()} when done to release the camera.
  */
-@Configurable
 public class AprilTagLocalization {
 
-    private static final boolean USE_WEBCAM = true;  // true for webcam, false for phone camera
     private final Telemetry telemetry;
+    private final AprilTagProcessor aprilTag;
+    private final VisionPortal visionPortal;
 
-    /* Orientation:
-     * If all values are zero (no rotation), that implies the camera is pointing straight up. In
-     * most cases, you'll need to set the pitch to -90 degrees (rotation about the x-axis), meaning
-     * the camera is horizontal. Use a yaw of 0 if the camera is pointing forwards, +90 degrees if
-     * it's pointing straight left, -90 degrees for straight right, etc. You can also set the roll
-     * to +/-90 degrees if it's vertical, or 180 degrees if it's upside-down.
-     */
+    /** Default camera pose (horizontal, facing forward) + webcam from config. */
+    public AprilTagLocalization(HardwareMap hardwareMap, Telemetry telemetry) {
+        this(hardwareMap,
+                new Position(DistanceUnit.INCH, 0, 0, 0, 0),
+                new YawPitchRollAngles(AngleUnit.DEGREES, 0, -90, 0, 0),
+                RobotConfig.Hardware.WEBCAM_NAME,
+                telemetry);
+    }
 
-//    private Position cameraPosition = new Position(DistanceUnit.INCH,
-//            0, 0, 0, 0);
-//    private YawPitchRollAngles cameraOrientation = new YawPitchRollAngles(AngleUnit.DEGREES,
-//            0, -90, 0, 0);
-
-    private AprilTagProcessor aprilTag;
-    private VisionPortal visionPortal;
-
-
-    public AprilTagLocalization(HardwareMap hardwareMap, Position cameraPosition, YawPitchRollAngles cameraOrientation, String webcamID, Telemetry telemetry){
+    public AprilTagLocalization(HardwareMap hardwareMap, Position cameraPosition,
+                                YawPitchRollAngles cameraOrientation, String webcamId,
+                                Telemetry telemetry) {
+        Objects.requireNonNull(hardwareMap, "hardwareMap");
+        Objects.requireNonNull(cameraPosition, "cameraPosition");
+        Objects.requireNonNull(cameraOrientation, "cameraOrientation");
+        Objects.requireNonNull(webcamId, "webcamId");
+        Objects.requireNonNull(telemetry, "telemetry");
         this.telemetry = telemetry;
 
         aprilTag = new AprilTagProcessor.Builder()
-                // The following default settings are available to un-comment and edit as needed.
                 .setDrawAxes(true)
                 .setDrawCubeProjection(true)
                 .setDrawTagOutline(true)
                 .setTagFamily(AprilTagProcessor.TagFamily.TAG_36h11)
-                // BIOBUZZ (2026-2027) tag library; getCurrentGameTagLibrary()
-                // tracks the active season game.
                 .setTagLibrary(AprilTagGameDatabase.getCurrentGameTagLibrary())
                 .setOutputUnits(DistanceUnit.INCH, AngleUnit.DEGREES)
                 .setCameraPose(cameraPosition, cameraOrientation)
                 .build();
 
-        VisionPortal.Builder builder = new VisionPortal.Builder();
-
-
-        builder.setCamera(hardwareMap.get(WebcamName.class, webcamID));
-        builder.enableLiveView(true);
-        builder.setCameraResolution(new Size(640, 480));
-        builder.setStreamFormat(VisionPortal.StreamFormat.YUY2);
-
-
-        builder.addProcessor(aprilTag);
-
-
-        visionPortal = builder.build();
-
-
+        visionPortal = new VisionPortal.Builder()
+                .setCamera(hardwareMap.get(WebcamName.class, webcamId))
+                .enableLiveView(RobotConfig.Vision.ENABLE_LIVE_VIEW)
+                .setCameraResolution(new Size(
+                        RobotConfig.Vision.CAMERA_WIDTH,
+                        RobotConfig.Vision.CAMERA_HEIGHT))
+                .setStreamFormat(VisionPortal.StreamFormat.YUY2)
+                .addProcessor(aprilTag)
+                .build();
     }
 
-    public void startStreaming(){
+    public void startStreaming() {
         visionPortal.resumeStreaming();
         visionPortal.resumeLiveView();
-        telemetry.update();
     }
 
-    public void stopStreaming(){
+    public void stopStreaming() {
         visionPortal.stopStreaming();
     }
 
-    /**
-     * Returns the first detection in the current frame that has a solvable
-     * robot pose, or null if none is available. Works for both single tags
-     * and tag clusters (SDK 12.0+).
-     */
+    /** Releases the camera. Call from the OpMode's stop path. */
+    public void close() {
+        visionPortal.close();
+    }
+
+    /** First detection in the current frame with a solvable robot pose, or null. */
     private AprilTagDetection firstDetectionWithPose() {
-        List<AprilTagDetection> currentDetections = aprilTag.getDetections();
-        for (AprilTagDetection detection : currentDetections) {
+        for (AprilTagDetection detection : aprilTag.getDetections()) {
             if (detection != null && detection.robotPose != null) {
                 return detection;
             }
@@ -114,112 +106,97 @@ public class AprilTagLocalization {
         return null;
     }
 
-    public double returnYPosition() {
-        AprilTagDetection detection = firstDetectionWithPose();
-        if (detection != null) {
-            return detection.robotPose.getPosition().y;
-        }
-        return 1000;
-    }
-
+    /** Robot X in inches, or UNKNOWN_POSE when no tag is solvable. */
     public double returnXPosition() {
         AprilTagDetection detection = firstDetectionWithPose();
-        if (detection != null) {
-            return detection.robotPose.getPosition().x;
-        }
-        return 1000;
+        return detection != null
+                ? detection.robotPose.getPosition().x
+                : RobotConfig.Launcher.UNKNOWN_POSE;
     }
 
+    /** Robot Y in inches, or UNKNOWN_POSE when no tag is solvable. */
+    public double returnYPosition() {
+        AprilTagDetection detection = firstDetectionWithPose();
+        return detection != null
+                ? detection.robotPose.getPosition().y
+                : RobotConfig.Launcher.UNKNOWN_POSE;
+    }
+
+    /** Robot yaw in degrees, or 0 when no tag is solvable. */
     public double returnYawPosition() {
         AprilTagDetection detection = firstDetectionWithPose();
-        if (detection != null) {
-            return detection.robotPose.getOrientation().getYaw(AngleUnit.DEGREES);
-        }
-        return 0;
+        return detection != null
+                ? detection.robotPose.getOrientation().getYaw(AngleUnit.DEGREES)
+                : 0.0;
     }
 
+    /** Full per-detection telemetry (single tags + clusters). */
     public void telemetryAprilTag() {
-
-        List<AprilTagDetection> currentDetections = aprilTag.getDetections();
-        telemetry.addData("# AprilTags Detected", currentDetections.size());
-
-
-
-        // Step through the list of detections and display info for each one.
-        for (AprilTagDetection detection : currentDetections) {
-            if (detection instanceof AprilTagSingleDetection) {
-                AprilTagSingleDetection singleDet = (AprilTagSingleDetection) detection;
-                if (singleDet.metadata != null) {
-                    telemetry.addData("Detection item", singleDet.id + singleDet.metadata.name);
-                    // Only use tags that don't have Obelisk in them
-
-                    if (singleDet.robotPose != null) {
-                        telemetry.addData("PositionX",
-                                singleDet.robotPose.getPosition().x);
-                        telemetry.addData("PosY",
-                                singleDet.robotPose.getPosition().y);
-                        telemetry.addData("PosZ",
-                                singleDet.robotPose.getPosition().z);
-                        telemetry.addData("Pitch", singleDet.robotPose.getOrientation().getPitch(AngleUnit.DEGREES));
-                        telemetry.addData("Roll", singleDet.robotPose.getOrientation().getRoll(AngleUnit.DEGREES));
-                        telemetry.addData("Yaw", singleDet.robotPose.getOrientation().getYaw(AngleUnit.DEGREES));
-                    } else {
-                        telemetry.addData("Pose", "not solvable for tag " + singleDet.id);
-                    }
-                    telemetry.update();
-                } else {
-                    telemetry.addData("ID", singleDet.id);
-                    telemetry.addData("Center", singleDet.center.x + singleDet.center.y);
-                    telemetry.addData("metadata", singleDet.metadata);
-                    telemetry.update();
-                }
-            } else if (detection instanceof AprilTagClusterDetection) {
-                AprilTagClusterDetection clusterDet = (AprilTagClusterDetection) detection;
-                telemetry.addData("Cluster", clusterDet.metadata != null ? clusterDet.metadata.name : "unknown");
-                telemetry.addData("Percent found", clusterDet.percentClusterFound);
-                if (clusterDet.robotPose != null) {
-                    telemetry.addData("PositionX", clusterDet.robotPose.getPosition().x);
-                    telemetry.addData("PosY", clusterDet.robotPose.getPosition().y);
-                    telemetry.addData("PosZ", clusterDet.robotPose.getPosition().z);
-                    telemetry.addData("Yaw", clusterDet.robotPose.getOrientation().getYaw(AngleUnit.DEGREES));
-                } else {
-                    telemetry.addData("Pose", "not solvable for cluster");
-                }
-                telemetry.update();
-            } else {
-                // Unknown detection subtype; robotPose lives on the base class.
-                telemetry.addData("Detection", detection.getClass().getSimpleName());
-                if (detection.robotPose != null) {
-                    telemetry.addData("PosX", detection.robotPose.getPosition().x);
-                    telemetry.addData("PosY", detection.robotPose.getPosition().y);
-                }
-                telemetry.update();
-            }
+        List<AprilTagDetection> detections = aprilTag.getDetections();
+        telemetry.addData("# AprilTags Detected", detections.size());
+        for (AprilTagDetection detection : detections) {
+            describeDetection(detection);
         }
-        telemetry.update();// end for() loop
+    }
 
-    }   // end method telemetryAprilTag()
-
-    public void checkCase(){
-        List<AprilTagDetection> currentDetections = aprilTag.getDetections();
-        telemetry.addData("# AprilTags Detected", currentDetections.size());
-        for (AprilTagDetection detection : currentDetections) {
+    /** Compact one-line-per-tag telemetry for driver debugging. */
+    public void checkCase() {
+        List<AprilTagDetection> detections = aprilTag.getDetections();
+        telemetry.addData("# AprilTags Detected", detections.size());
+        for (AprilTagDetection detection : detections) {
             if (detection == null || detection.robotPose == null) {
                 continue;
             }
             if (detection instanceof AprilTagSingleDetection) {
-                AprilTagSingleDetection singleDet = (AprilTagSingleDetection) detection;
-                String label = singleDet.metadata != null ? singleDet.metadata.name : ("ID " + singleDet.id);
+                AprilTagSingleDetection single = (AprilTagSingleDetection) detection;
+                String label = single.metadata != null ? single.metadata.name : ("ID " + single.id);
                 telemetry.addData("Obj", label);
-                telemetry.update();
             } else if (detection instanceof AprilTagClusterDetection) {
-                AprilTagClusterDetection clusterDet = (AprilTagClusterDetection) detection;
-                String label = clusterDet.metadata != null ? clusterDet.metadata.name : "cluster";
-                telemetry.addData("Obj", label + " (" + clusterDet.percentClusterFound + "% found)");
-                telemetry.update();
+                AprilTagClusterDetection cluster = (AprilTagClusterDetection) detection;
+                String label = cluster.metadata != null ? cluster.metadata.name : "cluster";
+                telemetry.addData("Obj", label + " (" + cluster.percentClusterFound + "% found)");
             }
         }
-        telemetry.update();
+    }
 
+    private void describeDetection(AprilTagDetection detection) {
+        if (detection instanceof AprilTagSingleDetection) {
+            AprilTagSingleDetection single = (AprilTagSingleDetection) detection;
+            if (single.metadata == null) {
+                telemetry.addData("ID", single.id);
+                return;
+            }
+            telemetry.addData("Detection", single.id + " " + single.metadata.name);
+            if (single.robotPose != null) {
+                telemetry.addData("Pos", "%.1f, %.1f, %.1f",
+                        single.robotPose.getPosition().x,
+                        single.robotPose.getPosition().y,
+                        single.robotPose.getPosition().z);
+                telemetry.addData("YawDeg", single.robotPose.getOrientation().getYaw(AngleUnit.DEGREES));
+            } else {
+                telemetry.addData("Pose", "not solvable for tag " + single.id);
+            }
+        } else if (detection instanceof AprilTagClusterDetection) {
+            AprilTagClusterDetection cluster = (AprilTagClusterDetection) detection;
+            telemetry.addData("Cluster",
+                    cluster.metadata != null ? cluster.metadata.name : "unknown");
+            telemetry.addData("Percent found", cluster.percentClusterFound);
+            if (cluster.robotPose != null) {
+                telemetry.addData("Pos", "%.1f, %.1f",
+                        cluster.robotPose.getPosition().x,
+                        cluster.robotPose.getPosition().y);
+                telemetry.addData("YawDeg",
+                        cluster.robotPose.getOrientation().getYaw(AngleUnit.DEGREES));
+            } else {
+                telemetry.addData("Pose", "not solvable for cluster");
+            }
+        } else if (detection != null) {
+            telemetry.addData("Detection", detection.getClass().getSimpleName());
+            if (detection.robotPose != null) {
+                telemetry.addData("Pos", "%.1f, %.1f",
+                        detection.robotPose.getPosition().x,
+                        detection.robotPose.getPosition().y);
+            }
+        }
     }
 }
