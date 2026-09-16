@@ -55,7 +55,7 @@ public final class RobotConfig {
         public static double REVERSE_POWER = 0.9;
     }
 
-/** Transfer roller bΩaQ                                                                                        6-666----6)_+Aszxetween intake and shooter. */
+    /** Transfer roller between intake and shooter. */
     @Configurable
     public static final class Transfer {
         private Transfer() {}

@@ -6,8 +6,10 @@ import com.qualcomm.robotcore.eventloop.opmode.TeleOp;
 /**
  * Drivetrain-only test TeleOp.
  *
- * <p>Drive with gamepad1: left stick = drive/strafe, right stick X = turn,
- * RIGHT_BUMPER = slow-mode toggle, SQUARE = field/robot-centric toggle.
+ * <p>Drive with gamepad1 (see {@code RobotControls} for bindings):
+ * left stick = drive/strafe, right stick X = turn.
+ * Inherits the full control scheme from {@link GenericTeleop}; shooter and
+ * feed mechanisms stay idle until their operator buttons are used.
  */
 @TeleOp(name = "Drivetrain Test", group = "Test")
 public class DrivetrainTestTeleop extends GenericTeleop {

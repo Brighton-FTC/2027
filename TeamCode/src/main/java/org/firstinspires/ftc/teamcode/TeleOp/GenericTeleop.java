@@ -14,32 +14,35 @@ import org.firstinspires.ftc.teamcode.FlyWheel.DynamicAngleComponent;
 import org.firstinspires.ftc.teamcode.FlyWheel.FlyWheelMotorComponent;
 import org.firstinspires.ftc.teamcode.FlyWheel.ServoKickComponent;
 import org.firstinspires.ftc.teamcode.IntakeMotorComponent;
-import org.firstinspires.ftc.teamcode.PSButtons;
 import org.firstinspires.ftc.teamcode.Turret.TurretPIDComponent;
 import org.firstinspires.ftc.teamcode.config.RobotConfig;
+import org.firstinspires.ftc.teamcode.config.RobotControls;
 import org.firstinspires.ftc.teamcode.pedro.Constants;
 
 /**
  * Shared TeleOp implementation. Subclasses only provide the alliance-specific
- * goal X and starting pose — all tuning lives in {@link RobotConfig}.
+ * goal X and starting pose — all tuning lives in {@link RobotConfig} and all
+ * bindings live in {@link RobotControls}.
  *
- * <p>Controls (gamepad1 = drive + shooter, gamepad2 = intake/transfer/kicker):
+ * <p>Simplified controls (see {@link RobotControls} to rebind):
  * <ul>
- *   <li>Left stick: drive/strafe, right stick X: turn.</li>
- *   <li>RIGHT_BUMPER: slow-mode toggle. SQUARE: field/robot-centric toggle.</li>
- *   <li>LEFT_BUMPER: turret auto-aim toggle. CIRCLE (gp1): shooter toggle.</li>
- *   <li>CIRCLE (gp2): intake toggle. TRIANGLE (gp2): reverse intake+transfer toggle.</li>
- *   <li>CROSS (gp2): transfer toggle. DPAD_LEFT (gp1): intake+transfer+kicker combo.</li>
- *   <li>DPAD_UP/DOWN (gp2): kicker open/close.</li>
+ *   <li>Driver: left stick = drive/strafe, right stick X = turn,
+ *       hold SLOW for slow mode, press FIELD_CENTRIC to toggle centricity.</li>
+ *   <li>Operator: hold COLLECT to run intake + transfer + kicker together,
+ *       press AIM_AND_SPIN to toggle turret auto-aim + flywheel together,
+ *       press FIRE to kick one shot, hold UNCLOG to reverse the feed.</li>
  * </ul>
+ *
+ * <p>HOLD actions are level-driven (release auto-stops, nothing latches on);
+ * only AIM_AND_SPIN (and SLOW when {@code SLOW_IS_TOGGLE}) latch.
  */
 public abstract class GenericTeleop extends OpMode {
 
     protected Follower follower;
     protected TelemetryManager panels;
 
-    private GamepadEx gp1;
-    private GamepadEx gp2;
+    private GamepadEx driver;
+    private GamepadEx operator;
 
     private TurretPIDComponent turret;
     private DynamicAngleComponent launcher;
@@ -49,13 +52,12 @@ public abstract class GenericTeleop extends OpMode {
 
     private Pose startingPose;
 
-    // Toggle state — each flag mirrors its mechanism, applied immediately.
-    private boolean slowMode = false;
+    // Latched state. Hold-to-run actions (collect/unclog) intentionally keep no
+    // latch — they are recomputed from the gamepad every loop.
     private boolean fieldCentric;
-    private boolean aiming = false;
-    private boolean shooting = false;
-    private boolean intakeRunning = false;
-    private boolean transferRunning = false;
+    private boolean slowModeToggle = false;
+    private boolean aimingAndSpinning = false;
+    private double firingUntilS = 0.0;
 
     /** Goal X in inches (field frame). Y/height come from {@link RobotConfig}. */
     protected abstract double getGoalX();
@@ -92,8 +94,8 @@ public abstract class GenericTeleop extends OpMode {
         kicker = new ServoKickComponent(hardwareMap, RobotConfig.Hardware.LAUNCH_CAP_SERVO);
         intake = new IntakeMotorComponent(hardwareMap, RobotConfig.Hardware.INTAKE_MOTOR);
 
-        gp1 = new GamepadEx(gamepad1);
-        gp2 = new GamepadEx(gamepad2);
+        driver = new GamepadEx(gamepad1);
+        operator = new GamepadEx(gamepad2);
 
         turret.resetTurretEncoder();
     }
@@ -106,27 +108,51 @@ public abstract class GenericTeleop extends OpMode {
     @Override
     public void loop() {
         follower.update();
-        gp1.readButtons();
-        gp2.readButtons();
+        driver.readButtons();
+        operator.readButtons();
 
         handleDrive();
-        handleAim();
-        handleShooter();
-        handleIntakeAndTransfer();
-        handleKicker();
+        handleAimAndSpin();
+        handleFeed();
         reportTelemetry();
 
         panels.update();
         telemetry.update();
     }
 
+    // ---- input helpers: every binding resolves through RobotControls.
+    // Gamepads are fixed by role: driver actions on gamepad1, operator on gamepad2.
+
+    private boolean driverJustPressed(GamepadKeys.Button button) {
+        return driver.wasJustPressed(button);
+    }
+
+    private boolean driverHeld(GamepadKeys.Button button) {
+        return driver.getButton(button);
+    }
+
+    private boolean operatorJustPressed(GamepadKeys.Button button) {
+        return operator.wasJustPressed(button);
+    }
+
+    private boolean operatorHeld(GamepadKeys.Button button) {
+        return operator.getButton(button);
+    }
+
     // ---- drive ----
 
     private void handleDrive() {
-        double scale = slowMode ? RobotConfig.Drive.SLOW_MODE_MULTIPLIER : 1.0;
-        double forward = gp1.getLeftY() * scale;
-        double strafe = -gp1.getLeftX() * scale;
-        double turn = -gp1.getRightX() * scale;
+        if (RobotControls.SLOW_IS_TOGGLE && driverJustPressed(RobotControls.SLOW_BUTTON)) {
+            slowModeToggle = !slowModeToggle;
+        }
+        boolean slow = RobotControls.SLOW_IS_TOGGLE
+                ? slowModeToggle
+                : driverHeld(RobotControls.SLOW_BUTTON);
+        double scale = slow ? RobotConfig.Drive.SLOW_MODE_MULTIPLIER : 1.0;
+
+        double forward = driver.getLeftY() * scale;
+        double strafe = -driver.getLeftX() * scale;
+        double turn = -driver.getRightX() * scale;
 
         if (fieldCentric) {
             DrivePowers powers = ManualDrive.fieldCentric(
@@ -136,113 +162,84 @@ public abstract class GenericTeleop extends OpMode {
             follower.manual(forward, strafe, turn);
         }
 
-        if (gp1.wasJustPressed(GamepadKeys.Button.RIGHT_BUMPER)) {
-            slowMode = !slowMode;
-        }
-        if (gp1.wasJustPressed(PSButtons.SQUARE)) {
+        if (driverJustPressed(RobotControls.FIELD_CENTRIC_BUTTON)) {
             fieldCentric = !fieldCentric;
         }
+
+        telemetry.addData("Slow mode", slow);
+        telemetry.addData("Field centric", fieldCentric);
     }
 
-    // ---- turret + shooter ----
+    // ---- turret + flywheel (linked) ----
 
-    private void handleAim() {
-        if (gp1.wasJustPressed(GamepadKeys.Button.LEFT_BUMPER)) {
-            aiming = !aiming;
-        }
-        if (aiming) {
-            turret.aimToObject(poseX(), poseY(), poseHeading());
-        }
-    }
-
-    private void handleShooter() {
-        if (gp1.wasJustPressed(PSButtons.CIRCLE)) {
-            shooting = !shooting;
-            if (!shooting) {
+    private void handleAimAndSpin() {
+        if (operatorJustPressed(RobotControls.AIM_AND_SPIN_BUTTON)) {
+            aimingAndSpinning = !aimingAndSpinning;
+            if (!aimingAndSpinning) {
                 launcher.stop();
+                turret.stop();
             }
         }
-        if (shooting) {
+        if (aimingAndSpinning) {
+            turret.aimToObject(poseX(), poseY(), poseHeading());
             launcher.dynamicMotorPower(poseX(), poseY());
         }
+        telemetry.addData("Aiming+Spinning", aimingAndSpinning);
+        telemetry.addData("Shooter RPM (target)", launcher.getRPM());
+        telemetry.addData("Turret deg", turret.getCurrentAngle());
     }
 
-    // ---- intake / transfer / kicker ----
+    // ---- intake / transfer / kicker (one feed path) ----
 
-    private void handleIntakeAndTransfer() {
-        // Reverse intake + reverse transfer (unclog).
-        if (gp2.wasJustPressed(PSButtons.TRIANGLE)) {
-            if (intakeRunning || transferRunning) {
-                intake.stopMotor();
-                transfer.stopMotor();
-                intakeRunning = false;
-                transferRunning = false;
-            } else {
-                intake.reverseMotor();
-                transfer.runMotorAt(RobotConfig.Transfer.REVERSE_POWER);
-                intakeRunning = true;
-                transferRunning = true;
-            }
-        }
+    private void handleFeed() {
+        boolean unclog = operatorHeld(RobotControls.UNCLOG_BUTTON);
+        boolean collect = !unclog && operatorHeld(RobotControls.COLLECT_BUTTON);
 
-        // Transfer roller alone.
-        if (gp2.wasJustPressed(PSButtons.CROSS)) {
-            transferRunning = !transferRunning;
-            if (transferRunning) {
-                transfer.runMotorAt(RobotConfig.Transfer.FORWARD_POWER);
-            } else {
-                transfer.stopMotor();
-            }
-        }
-
-        // Intake roller alone.
-        if (gp2.wasJustPressed(PSButtons.CIRCLE)) {
-            intakeRunning = !intakeRunning;
-            if (intakeRunning) {
-                intake.startMotor();
-            } else {
-                intake.stopMotor();
-            }
-        }
-
-        // Combo: intake + transfer + kicker open (one-button collect-and-feed).
-        if (gp1.wasJustPressed(GamepadKeys.Button.DPAD_LEFT)) {
-            if (intakeRunning || transferRunning) {
-                intake.stopMotor();
-                transfer.stopMotor();
-                kicker.close();
-                intakeRunning = false;
-                transferRunning = false;
-            } else {
-                intake.startMotor();
-                transfer.runMotorAt(RobotConfig.Transfer.FORWARD_POWER);
-                kicker.open();
-                intakeRunning = true;
-                transferRunning = true;
-            }
-        }
-    }
-
-    private void handleKicker() {
-        if (gp2.wasJustPressed(GamepadKeys.Button.DPAD_UP)) {
-            kicker.open();
-        }
-        if (gp2.wasJustPressed(GamepadKeys.Button.DPAD_DOWN)) {
+        if (unclog) {
+            // Unclog wins over everything: reverse the path, force kicker shut.
+            intake.reverseMotor();
+            transfer.runMotorAt(RobotConfig.Transfer.REVERSE_POWER);
             kicker.close();
+            firingUntilS = 0.0;
+        } else if (collect) {
+            intake.startMotor();
+            transfer.runMotorAt(RobotConfig.Transfer.FORWARD_POWER);
+            if (RobotControls.COLLECT_OPENS_KICKER) {
+                kicker.open();
+            }
+            firingUntilS = 0.0;
+        } else {
+            intake.stopMotor();
+            transfer.stopMotor();
+
+            if (operatorJustPressed(RobotControls.FIRE_BUTTON)) {
+                kicker.open();
+                firingUntilS = getRuntime() + Math.max(0.0, RobotControls.FIRE_KICK_SECONDS);
+            } else if (firingUntilS != 0.0) {
+                if (getRuntime() >= firingUntilS) {
+                    kicker.close();
+                    firingUntilS = 0.0;
+                }
+            } else {
+                // Safe default: kicker stays shut when idle (e.g. after COLLECT
+                // is released) so staged balls can't dribble into the wheel.
+                kicker.close();
+            }
         }
+
+        telemetry.addData("Collecting", collect);
+        telemetry.addData("Unclogging", unclog);
+        telemetry.addData("Kicker open", kicker.isOpen());
     }
 
     // ---- telemetry ----
 
     private void reportTelemetry() {
-        telemetry.addData("Shooter RPM (target)", launcher.getRPM());
-        telemetry.addData("Turret deg", turret.getCurrentAngle());
-        telemetry.addData("Aiming", aiming);
-        telemetry.addData("Shooting", shooting);
-        telemetry.addData("Slow mode", slowMode);
-        telemetry.addData("Field centric", fieldCentric);
-        telemetry.addData("Intake", intakeRunning);
-        telemetry.addData("Transfer", transferRunning);
+        telemetry.addData("Controls",
+                "Slow=%s Field=%s | Collect=%s AimSpin=%s Fire=%s Unclog=%s",
+                RobotControls.SLOW_BUTTON, RobotControls.FIELD_CENTRIC_BUTTON,
+                RobotControls.COLLECT_BUTTON, RobotControls.AIM_AND_SPIN_BUTTON,
+                RobotControls.FIRE_BUTTON, RobotControls.UNCLOG_BUTTON);
         panels.debug("position", follower.pose());
         panels.debug("velocity", follower.velocity());
     }
