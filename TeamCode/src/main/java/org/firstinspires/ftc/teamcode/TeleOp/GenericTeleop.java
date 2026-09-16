@@ -12,7 +12,7 @@ import com.qualcomm.robotcore.eventloop.opmode.OpMode;
 
 import org.firstinspires.ftc.teamcode.FlyWheel.DynamicAngleComponent;
 import org.firstinspires.ftc.teamcode.FlyWheel.FlyWheelMotorComponent;
-import org.firstinspires.ftc.teamcode.FlyWheel.ServoKickComponent;
+import org.firstinspires.ftc.teamcode.Servo.ServoComponent;
 import org.firstinspires.ftc.teamcode.IntakeMotorComponent;
 import org.firstinspires.ftc.teamcode.Turret.TurretPIDComponent;
 import org.firstinspires.ftc.teamcode.config.RobotConfig;
@@ -47,7 +47,7 @@ public abstract class GenericTeleop extends OpMode {
     private TurretPIDComponent turret;
     private DynamicAngleComponent launcher;
     private FlyWheelMotorComponent transfer;
-    private ServoKickComponent kicker;
+    private ServoComponent kicker;
     private IntakeMotorComponent intake;
 
     private Pose startingPose;
@@ -91,7 +91,7 @@ public abstract class GenericTeleop extends OpMode {
                 goalX, goalY,
                 RobotConfig.Field.GOAL_HEIGHT);
         transfer = new FlyWheelMotorComponent(hardwareMap, RobotConfig.Hardware.TRANSFER_MOTOR);
-        kicker = new ServoKickComponent(hardwareMap, RobotConfig.Hardware.LAUNCH_CAP_SERVO);
+        kicker = new ServoComponent(hardwareMap, RobotConfig.Hardware.LAUNCH_CAP_SERVO);
         intake = new IntakeMotorComponent(hardwareMap, RobotConfig.Hardware.INTAKE_MOTOR);
 
         driver = new GamepadEx(gamepad1);

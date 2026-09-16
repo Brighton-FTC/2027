@@ -1,4 +1,4 @@
-package org.firstinspires.ftc.teamcode.FlyWheel;
+package org.firstinspires.ftc.teamcode.Servo;
 
 import com.qualcomm.robotcore.hardware.HardwareMap;
 import com.qualcomm.robotcore.hardware.Servo;
@@ -11,12 +11,12 @@ import java.util.Objects;
  * Kicker servo that pushes a ball into the spinning flywheel.
  * Positions come from {@link RobotConfig.Kicker}.
  */
-public class ServoKickComponent {
+public class ServoComponent {
 
     private final Servo servo;
     private boolean open = false;
 
-    public ServoKickComponent(HardwareMap hardwareMap, String servoId) {
+    public ServoComponent(HardwareMap hardwareMap, String servoId) {
         Objects.requireNonNull(hardwareMap, "hardwareMap");
         Objects.requireNonNull(servoId, "servoId");
         servo = hardwareMap.get(Servo.class, servoId);
