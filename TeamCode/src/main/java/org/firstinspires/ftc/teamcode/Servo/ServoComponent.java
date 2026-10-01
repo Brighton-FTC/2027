@@ -5,49 +5,55 @@ import com.qualcomm.robotcore.hardware.Servo;
 
 import org.firstinspires.ftc.teamcode.config.RobotConfig;
 
-import java.util.Objects;
-
-/**
- * Kicker servo that pushes a ball into the spinning flywheel.
- * Positions come from {@link RobotConfig.Kicker}.
- */
+/** Servo with open, closed and default positions. */
 public class ServoComponent {
 
     private final Servo servo;
+    private final double openPos;
+    private final double closedPos;
+    private final double defaultPos;
     private boolean open = false;
 
+    /** Kicker servo, using RobotConfig.Kicker positions. Starts closed. */
     public ServoComponent(HardwareMap hardwareMap, String servoId) {
-        Objects.requireNonNull(hardwareMap, "hardwareMap");
-        Objects.requireNonNull(servoId, "servoId");
+        this(hardwareMap, servoId,
+                RobotConfig.Kicker.OPEN_POSITION,
+                RobotConfig.Kicker.CLOSED_POSITION,
+                RobotConfig.Kicker.CLOSED_POSITION);
+    }
+
+    /** Any servo with its own positions. Starts at default. */
+    public ServoComponent(HardwareMap hardwareMap, String servoId,
+                          double openPos, double closedPos, double defaultPos) {
         servo = hardwareMap.get(Servo.class, servoId);
-        close();
+        this.openPos = openPos;
+        this.closedPos = closedPos;
+        this.defaultPos = defaultPos;
+        toDefault();
     }
 
     public void open() {
-        servo.setPosition(clamp(RobotConfig.Kicker.OPEN_POSITION));
+        servo.setPosition(openPos);
         open = true;
     }
 
     public void close() {
-        servo.setPosition(clamp(RobotConfig.Kicker.CLOSED_POSITION));
+        servo.setPosition(closedPos);
         open = false;
     }
 
-    /** Toggles and returns the new state (true = open). */
+    public void toDefault() {
+        servo.setPosition(defaultPos);
+        open = false;
+    }
+
     public boolean toggle() {
-        if (open) {
-            close();
-        } else {
-            open();
-        }
+        if (open) close();
+        else open();
         return open;
     }
 
     public boolean isOpen() {
         return open;
-    }
-
-    private static double clamp(double position) {
-        return Math.max(0.0, Math.min(1.0, position));
     }
 }

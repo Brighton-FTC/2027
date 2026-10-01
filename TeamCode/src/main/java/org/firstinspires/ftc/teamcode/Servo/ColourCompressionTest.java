@@ -18,11 +18,6 @@ public class ColourCompressionTest extends LinearOpMode {
     private static final String SENSOR_NAME = "colorSensor";
     private static final String SERVO_NAME  = "compressionServo";
 
-    // Compression positions (tune these on the real robot)
-    private static final double WIDE_POS    = 0.80; // red or blue
-    private static final double NARROW_POS  = 0.40; // yellow
-    private static final double DEFAULT_POS = 0.60; // nothing detected
-
     private static final float SENSOR_GAIN = 2.0f;
 
     // A sample counts as "present" if it's closer than this
@@ -42,6 +37,9 @@ public class ColourCompressionTest extends LinearOpMode {
     private DistanceSensor distanceSensor; // null if not supported
     private Servo compressionServo;        // null if not found
 
+    private boolean isOpen = false;
+    private double currentPos = ColourServo.DEFAULT_POSITION;
+
     @Override
     public void runOpMode() {
         colorSensor = hardwareMap.get(NormalizedColorSensor.class, SENSOR_NAME);
@@ -56,6 +54,9 @@ public class ColourCompressionTest extends LinearOpMode {
         } catch (Exception e) {
             compressionServo = null;
         }
+
+        // Start at default, same as ColourServo
+        setCompression(ColourServo.DEFAULT_POSITION);
 
         telemetry.addData("Servo", compressionServo == null
                 ? "NOT FOUND, running in simulation mode"
@@ -78,15 +79,20 @@ public class ColourCompressionTest extends LinearOpMode {
                     : -1;
 
             SampleColour colour = classify(hsv, distanceCm);
-            double target = positionFor(colour);
 
-            if (compressionServo != null) {
-                compressionServo.setPosition(target);
+            if (colour == SampleColour.RED || colour == SampleColour.BLUE) {
+                setCompression(ColourServo.OPEN_POSITION);     // open, wait for yellow
+                isOpen = true;
+            } else if (colour == SampleColour.YELLOW && isOpen) {
+                setCompression(ColourServo.DEFAULT_POSITION);  // back to default
+                isOpen = false;
             }
+            // NONE, or yellow while not open: hold position
 
             telemetry.addData("Mode", compressionServo == null ? "SIMULATED" : "LIVE");
             telemetry.addData("Detected", colour);
-            telemetry.addData("Target servo pos", "%.2f", target);
+            telemetry.addData("Compression", isOpen ? "OPEN (waiting for yellow)" : "DEFAULT");
+            telemetry.addData("Servo pos", "%.2f", currentPos);
             telemetry.addLine();
             telemetry.addData("Hue", "%.1f", hsv[0]);
             telemetry.addData("Sat", "%.2f", hsv[1]);
@@ -95,6 +101,13 @@ public class ColourCompressionTest extends LinearOpMode {
             telemetry.addData("R / G / B", "%.3f / %.3f / %.3f",
                     rgba.red, rgba.green, rgba.blue);
             telemetry.update();
+        }
+    }
+
+    private void setCompression(double position) {
+        currentPos = Math.max(0.0, Math.min(1.0, position));
+        if (compressionServo != null) {
+            compressionServo.setPosition(currentPos);
         }
     }
 
@@ -117,17 +130,5 @@ public class ColourCompressionTest extends LinearOpMode {
         if (hue >= BLUE_MIN_HUE && hue <= BLUE_MAX_HUE)     return SampleColour.BLUE;
 
         return SampleColour.NONE;
-    }
-
-    private double positionFor(SampleColour colour) {
-        switch (colour) {
-            case RED:
-            case BLUE:
-                return WIDE_POS;
-            case YELLOW:
-                return NARROW_POS;
-            default:
-                return DEFAULT_POS;
-        }
     }
 }
