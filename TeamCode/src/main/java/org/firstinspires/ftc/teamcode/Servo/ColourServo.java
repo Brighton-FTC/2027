@@ -36,10 +36,11 @@ public class ColourServo {
         return detectedColor.UNKNOWN;
     }
 
-    public void update(Telemetry telemetry) {
+    public detectedColor update(Telemetry telemetry) {
         detectedColor colour = getDetectedColor(telemetry);
         if (colour == detectedColor.RED || colour == detectedColor.BLUE) compression.open();  // wider, less compression
         else if (colour == detectedColor.YELLOW) compression.close();                         // narrower, more compression
         telemetry.addData("colour", colour);
+        return colour;
     }
 }
