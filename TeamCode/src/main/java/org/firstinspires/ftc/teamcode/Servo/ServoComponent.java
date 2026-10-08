@@ -25,7 +25,7 @@ public class ServoComponent {
     /** Any servo with its own positions. Starts at default. */
     public ServoComponent(HardwareMap hardwareMap, String servoId,
                           double openPos, double closedPos, double defaultPos) {
-        servo = hardwareMap.get(Servo.class, servoId);
+        this.servo = hardwareMap.get(Servo.class, servoId);
         this.openPos = openPos;
         this.closedPos = closedPos;
         this.defaultPos = defaultPos;
@@ -51,6 +51,12 @@ public class ServoComponent {
         if (open) close();
         else open();
         return open;
+    }
+    public void setDefaultPos(){servo.setPosition(defaultPos);}
+    public double getPos(){return servo.getPosition();}
+
+    public void setPos(double Pos){
+        servo.setPosition(Pos);
     }
 
     public boolean isOpen() {

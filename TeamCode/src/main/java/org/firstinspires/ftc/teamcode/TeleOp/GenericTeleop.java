@@ -96,8 +96,8 @@ public abstract class GenericTeleop extends OpMode {
 
         driver = new GamepadEx(gamepad1);
         operator = new GamepadEx(gamepad2);
+        turret.reset();
 
-        turret.resetTurretEncoder();
     }
 
     @Override
@@ -177,7 +177,6 @@ public abstract class GenericTeleop extends OpMode {
             aimingAndSpinning = !aimingAndSpinning;
             if (!aimingAndSpinning) {
                 launcher.stop();
-                turret.stop();
             }
         }
         if (aimingAndSpinning) {

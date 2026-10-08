@@ -102,15 +102,10 @@ public final class RobotConfig {
     public static final class Turret {
         private Turret() {}
 
-        public static double KP = 0.008;
-        public static double KI = 0.0;
-        public static double KD = 0.0;
-        public static double KF = 0.0;
-
         /** Degrees of turret rotation per encoder tick. */
-        public static double DEGREES_PER_TICK = 0.167;
+        public static double DEGREES_PER_TICK = ((double) 1 /1800);
         /** Software end-stop, symmetric +/- degrees. */
-        public static double MAX_ANGLE_DEG = 90.0;
+        public static double MAX_ANGLE_DEG = 360.0;
         /** Clamp on PIDF output power. */
         public static double MAX_POWER = 1.0;
         /** Considered aimed when within this many degrees of target. */
