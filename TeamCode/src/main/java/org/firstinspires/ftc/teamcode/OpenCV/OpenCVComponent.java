@@ -217,6 +217,8 @@ public class OpenCVComponent {
      * Horizontal error (px): contour centroid X minus frame center.
      * Negative = target is left of center. NaN when no target visible.
      * */
+
+    // Use this for X - x_obj = x_robot + Zcos theta + X sin Theta
     public double getCenterErrorX() {
         SamplePipeline pipeline = currentPipeline();
         double cx = pipeline.getCentroidX();
@@ -243,7 +245,7 @@ public class OpenCVComponent {
         return cy - height / 2.0;
     }
 
-    // Calculate the raw x and y using this - x_obj = x_robot + getDistance()
+    // Calculate the raw x and y using this - x_obj = x_robot + getDistance()*cos(bearing)
     public double getDistance(){
         return getBestDetection().distanceIn;
     }
@@ -285,14 +287,14 @@ public class OpenCVComponent {
             telemetry.addData("OpenCV", "+%d more", dets.size() - shown);
         }
         // Center-error lines disabled with the helpers above.
-        /*
+
         double errX = getCenterErrorX();
         double errY = getCenterErrorY();
         telemetry.addData("OpenCV X centered",
                 isCentered() + (Double.isNaN(errX) ? "" : String.format(" (err %+.0f px)", errX)));
         telemetry.addData("OpenCV Y centered",
                 isCentered() + (Double.isNaN(errY) ? "" : String.format(" (err %+.0f px)", errY)));
-        */
+
     }
 
     private static String fmtIn(double inches) {
