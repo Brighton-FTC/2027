@@ -152,6 +152,13 @@ public final class RobotConfig {
         /** Drop below normal that counts as tilted (deg). */
         public static double TILT_THRESHOLD_DEG = 3.0;
 
+        /** EasyOpenCV sample detector: contour below this (px^2) is ignored as noise. */
+        public static double OPENCV_MIN_AREA_PX = 500.0;
+        /** EasyOpenCV: |centroidX - centerX| within this (px) counts as centered. */
+        public static double OPENCV_CENTER_TOLERANCE_PX = 60.0;
+        /** EasyOpenCV Gaussian blur kernel (must stay odd). */
+        public static int OPENCV_BLUR_SIZE = 5;
+
         /**
          * The four BIOBUZZ HIVE CELL clusters. Member IDs match the SDK's
          * {@code AprilTagGameDatabase.getBioBuzzTagLibrary()} exactly:

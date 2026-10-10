@@ -27,7 +27,9 @@ android {
 dependencies {
     implementation project(':FtcRobotController')
     implementation 'org.ftclib.ftclib:core:2.1.1'
-    // the following is optional if you want vision
-    implementation 'org.ftclib.ftclib:vision:2.1.0'
-
+    // EasyOpenCV 1.7.3 (latest, Maven Central) for the OpenCV sample pipelines.
+    // NOTE: org.ftclib.ftclib:vision intentionally omitted — nothing imports it,
+    // and its 2.1.0 skew vs core 2.1.1 risks runtime ABI mismatch. Re-add at
+    // 2.1.1 only if FTCLib vision classes are actually used.
+    implementation 'org.openftc:easyopencv:1.7.3'
 }
