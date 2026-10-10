@@ -17,10 +17,14 @@ import org.firstinspires.ftc.teamcode.IntakeMotorComponent;
 import org.firstinspires.ftc.teamcode.Turret.TurretPIDComponent;
 import org.firstinspires.ftc.teamcode.AprilTag.AprilTagLocalization;
 import org.firstinspires.ftc.teamcode.AprilTag.TiltEstimateComponent;
+import org.firstinspires.ftc.teamcode.OpenCV.OpenCVComponent;
+import org.firstinspires.ftc.teamcode.OpenCV.SamplePipeline;
 import org.firstinspires.ftc.teamcode.config.RobotConfig;
 import org.firstinspires.ftc.teamcode.config.RobotControls;
 import org.firstinspires.ftc.teamcode.config.RobotConfig.Vision.HiveCell;
 import org.firstinspires.ftc.teamcode.pedro.Constants;
+
+import java.util.List;
 
 /**
  * Shared TeleOp implementation. Subclasses provide all alliance-specific
@@ -57,6 +61,7 @@ public abstract class GenericTeleop extends OpMode {
     private IntakeMotorComponent intake;
     private AprilTagLocalization aprilTags;
     private TiltEstimateComponent tiltEstimator;
+    private OpenCVComponent openCv;
 
     private Pose startingPose;
 
@@ -87,6 +92,19 @@ public abstract class GenericTeleop extends OpMode {
     /** Tilt threshold in deg (shared tuning, override only if needed per alliance). */
     protected double getTiltThreshold() {
         return RobotConfig.Vision.TILT_THRESHOLD_DEG;
+    }
+
+    /**
+     * Which sample color the OpenCV detector tracks, or null to leave OpenCV
+     * disabled. Override in the subclass to enable (e.g. alliance color).
+     *
+     * <p>WARNING: the AprilTag {@code VisionPortal} and EasyOpenCV cannot hold
+     * the same webcam at once. Enable one vision path at a time per OpMode —
+     * if this returns non-null while {@code aprilTags} is streaming the same
+     * camera, the second open will fail and report via telemetry.
+     */
+    protected OpenCVComponent.Target getOpenCVTarget() {
+        return null;
     }
 
     /** Where localization is seeded at init. */
@@ -128,6 +146,17 @@ public abstract class GenericTeleop extends OpMode {
             telemetry.addData("AprilTag vision", "init failed: %s", e.getMessage());
         }
         tiltEstimator = new TiltEstimateComponent(getNormalPitch(), getTiltThreshold());
+        OpenCVComponent.Target cvTarget = getOpenCVTarget();
+        if (cvTarget != null) {
+            try {
+                openCv = new OpenCVComponent(hardwareMap, telemetry);
+                openCv.setTarget(cvTarget);
+                openCv.startStreaming();
+            } catch (Exception e) {
+                openCv = null;
+                telemetry.addData("OpenCV vision", "init failed: %s", e.getMessage());
+            }
+        }
 
         driver = new GamepadEx(gamepad1);
         operator = new GamepadEx(gamepad2);
@@ -150,6 +179,7 @@ public abstract class GenericTeleop extends OpMode {
         handleAimAndSpin();
         handleFeed();
         reportTiltTelemetry();
+        reportOpenCVTelemetry();
         reportTelemetry();
 
         panels.update();
@@ -161,6 +191,12 @@ public abstract class GenericTeleop extends OpMode {
         if (aprilTags != null) {
             try {
                 aprilTags.close();
+            } catch (Exception ignored) {
+            }
+        }
+        if (openCv != null) {
+            try {
+                openCv.close();
             } catch (Exception ignored) {
             }
         }
@@ -306,6 +342,38 @@ public abstract class GenericTeleop extends OpMode {
         panels.debug("tilt/isTilt", tiltStatus);
         if (visible) {
             panels.debug("tilt/pitchDeg", pitch);
+        }
+    }
+
+    /**
+     * OpenCV sample detection, on both Driver Station and Panels.
+     * No-op when OpenCV is disabled ({@link #getOpenCVTarget()} null) or init
+     * failed — the component's own {@code reportTelemetry()} covers the
+     * Driver Station lines, and key values are mirrored to Panels here.
+     */
+    private void reportOpenCVTelemetry() {
+        if (openCv == null) {
+            return;
+        }
+        openCv.reportTelemetry();
+        List<SamplePipeline.Detection> dets = openCv.getDetections();
+        panels.debug("opencv/target", openCv.getTarget());
+        panels.debug("opencv/streaming", openCv.isStreaming());
+        panels.debug("opencv/count", dets.size());
+        SamplePipeline.Detection best = openCv.getBestDetection();
+        if (best != null) {
+            panels.debug("opencv/bearingDeg", best.bearingDeg);
+            panels.debug("opencv/elevationDeg", best.elevationDeg);
+            if (!Double.isNaN(best.distanceIn)) {
+                panels.debug("opencv/distanceIn", best.distanceIn);
+                panels.debug("opencv/forwardIn", best.forwardIn);
+                panels.debug("opencv/lateralIn", best.lateralIn);
+            }
+            if (!Double.isNaN(best.heightIn)) {
+                panels.debug("opencv/heightIn", best.heightIn);
+            }
+            // Center-error display disabled with OpenCVComponent helpers.
+            // panels.debug("opencv/centered", openCv.isCentered());
         }
     }
 

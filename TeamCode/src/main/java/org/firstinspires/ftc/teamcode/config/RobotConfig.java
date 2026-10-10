@@ -158,6 +158,14 @@ public final class RobotConfig {
         public static double OPENCV_CENTER_TOLERANCE_PX = 60.0;
         /** EasyOpenCV Gaussian blur kernel (must stay odd). */
         public static int OPENCV_BLUR_SIZE = 5;
+        /** EasyOpenCV camera horizontal field of view (deg). Calibrate per webcam. */
+        public static double OPENCV_HFOV_DEG = 60.0;
+        /** EasyOpenCV known object width (in) for distance math. Measure your game element. */
+        public static double OPENCV_KNOWN_OBJECT_WIDTH_IN = 3.5;
+        /** EasyOpenCV camera height above the ground (in). Measure your mount. */
+        public static double OPENCV_CAMERA_HEIGHT_IN = 12.0;
+        /** EasyOpenCV camera downward tilt below horizontal (deg, + = looking down). Measure your mount. */
+        public static double OPENCV_CAMERA_PITCH_DEG = 20.0;
 
         /**
          * The four BIOBUZZ HIVE CELL clusters. Member IDs match the SDK's
