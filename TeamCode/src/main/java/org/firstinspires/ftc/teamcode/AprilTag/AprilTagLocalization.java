@@ -9,6 +9,7 @@ import org.firstinspires.ftc.robotcore.external.hardware.camera.WebcamName;
 import org.firstinspires.ftc.robotcore.external.navigation.AngleUnit;
 import org.firstinspires.ftc.robotcore.external.navigation.DistanceUnit;
 import org.firstinspires.ftc.teamcode.config.RobotConfig;
+import org.firstinspires.ftc.teamcode.config.RobotConfig.Vision.HiveCell;
 import org.firstinspires.ftc.vision.VisionPortal;
 import org.firstinspires.ftc.vision.apriltag.AprilTagClusterDetection;
 import org.firstinspires.ftc.vision.apriltag.AprilTagDetection;
@@ -59,67 +60,6 @@ public class AprilTagLocalization {
 
     /** Sentinel meaning "no tag with a valid pitch is visible". */
     public static final double UNKNOWN_PITCH = RobotConfig.Launcher.UNKNOWN_POSE;
-
-    /**
-     * The four BIOBUZZ HIVE CELL clusters. Member IDs match the SDK's
-     * {@code AprilTagGameDatabase.getBioBuzzTagLibrary()} exactly:
-     * each cluster holds 4 consecutive tags, and the SDK reports one
-     * {@link AprilTagClusterDetection} per cluster (never single detections
-     * for member IDs).
-     */
-    public enum HiveCell {
-        /** IDs 30-33, red CELL, field side opposite the audience. */
-        RED_SCORING("RED SCORING", 30, 31, 32, 33),
-        /** IDs 34-37, red CELL, audience side. */
-        RED_AUDIENCE("RED AUDIENCE", 34, 35, 36, 37),
-        /** IDs 38-41, blue CELL, audience side. */
-        BLUE_AUDIENCE("BLUE AUDIENCE", 38, 39, 40, 41),
-        /** IDs 42-45, blue CELL, field side opposite the audience. */
-        BLUE_SCORING("BLUE SCORING", 42, 43, 44, 45);
-
-        /** Cluster {@code metadata.name} / {@code metadata.shortName} in the SDK library. */
-        public final String clusterName;
-        /** The 4 member tag IDs, in order. */
-        public final int[] memberIds;
-
-        HiveCell(String clusterName, int... memberIds) {
-            this.clusterName = clusterName;
-            this.memberIds = memberIds;
-        }
-
-        /** True when the tag ID belongs to this cluster. */
-        public boolean contains(int tagId) {
-            for (int id : memberIds) {
-                if (id == tagId) {
-                    return true;
-                }
-            }
-            return false;
-        }
-
-        /** Finds the cell owning a member tag ID, or null. */
-        public static HiveCell forMemberId(int tagId) {
-            for (HiveCell cell : values()) {
-                if (cell.contains(tagId)) {
-                    return cell;
-                }
-            }
-            return null;
-        }
-
-        /** Finds a cell by SDK cluster name/shortName, or null. */
-        public static HiveCell forClusterName(String name) {
-            if (name == null) {
-                return null;
-            }
-            for (HiveCell cell : values()) {
-                if (cell.clusterName.equals(name)) {
-                    return cell;
-                }
-            }
-            return null;
-        }
-    }
 
     private final Telemetry telemetry;
     private final AprilTagProcessor aprilTag;
@@ -228,12 +168,49 @@ public class AprilTagLocalization {
     }
 
     /**
-     * Pitch (deg) of a HIVE CELL cluster, or {@link #UNKNOWN_PITCH} when that
-     * cluster is not visible or has no pose.
+     * Pitch (deg) of the chosen HIVE CELL, or {@link #UNKNOWN_PITCH} when that
+     * cell is not visible or has no pose.
+     *
+     * <p>Loops the current detections and matches them against the chosen
+     * cell's member IDs from {@link HiveCell}:
+     * <ul>
+     *   <li>Cluster detections (the normal BIOBUZZ case — one
+     *       {@link AprilTagClusterDetection} per cell): matched when the
+     *       cluster's {@code metadata.name} / {@code metadata.shortName}
+     *       resolves to the chosen cell via {@link HiveCell#forClusterName}.
+     *       The cluster {@code ftcPose.pitch} is already the fused pitch of
+     *       its member tags, so it is returned directly.</li>
+     *   <li>Single detections (fallback, e.g. custom library): matched when
+     *       {@code single.id} is one of the chosen cell's member IDs
+     *       ({@link HiveCell#contains}).</li>
+     * </ul>
      */
     public double getClusterPitch(HiveCell cell) {
         Objects.requireNonNull(cell, "cell");
-        return getClusterPitch(cell.clusterName);
+        for (AprilTagDetection detection : aprilTag.getDetections()) {
+            if (detection == null || detection.ftcPose == null) {
+                continue;
+            }
+            if (detection instanceof AprilTagClusterDetection) {
+                AprilTagClusterDetection cluster = (AprilTagClusterDetection) detection;
+                if (cluster.metadata == null) {
+                    continue;
+                }
+                HiveCell seen = HiveCell.forClusterName(cluster.metadata.name);
+                if (seen == null) {
+                    seen = HiveCell.forClusterName(cluster.metadata.shortName);
+                }
+                if (seen == cell) {
+                    return cluster.ftcPose.pitch;
+                }
+            } else if (detection instanceof AprilTagSingleDetection) {
+                AprilTagSingleDetection single = (AprilTagSingleDetection) detection;
+                if (cell.contains(single.id)) {
+                    return single.ftcPose.pitch;
+                }
+            }
+        }
+        return UNKNOWN_PITCH;
     }
 
     /** Pitch (deg) of the red CELL opposite the audience (IDs 30-33). */
@@ -255,25 +232,6 @@ public class AprilTagLocalization {
     public double getBlueScoringPitch() {
         return getClusterPitch(HiveCell.BLUE_SCORING);
     }
-
-    /**
-     * Pitch (deg) of a tag cluster by short name, or {@link #UNKNOWN_PITCH}
-     * when that cluster is not visible or has no pose.
-     */
-    public double getClusterPitch(String clusterShortName) {
-        Objects.requireNonNull(clusterShortName, "clusterShortName");
-        for (AprilTagDetection detection : aprilTag.getDetections()) {
-            if (detection instanceof AprilTagClusterDetection) {
-                AprilTagClusterDetection cluster = (AprilTagClusterDetection) detection;
-                if (cluster.metadata != null
-                        && clusterShortName.equals(cluster.metadata.shortName)) {
-                    return cluster.ftcPose != null ? cluster.ftcPose.pitch : UNKNOWN_PITCH;
-                }
-            }
-        }
-        return UNKNOWN_PITCH;
-    }
-
     /** True when at least one detection currently has a valid {@code ftcPose}. */
     public boolean hasTagPose() {
         return firstDetectionWithFtcPose() != null;
@@ -306,7 +264,10 @@ public class AprilTagLocalization {
                 AprilTagClusterDetection cluster = (AprilTagClusterDetection) detection;
                 String label = cluster.metadata != null ? cluster.metadata.name : "cluster";
                 HiveCell cell = cluster.metadata != null
-                        ? HiveCell.forClusterName(cluster.metadata.shortName) : null;
+                        ? HiveCell.forClusterName(cluster.metadata.name) : null;
+                if (cell == null && cluster.metadata != null) {
+                    cell = HiveCell.forClusterName(cluster.metadata.shortName);
+                }
                 String ids = cell != null ? java.util.Arrays.toString(cell.memberIds) : "";
                 telemetry.addData("Obj", "%s %s pitch %.1f (%d%% found)",
                         label, ids, cluster.ftcPose.pitch, cluster.percentClusterFound);

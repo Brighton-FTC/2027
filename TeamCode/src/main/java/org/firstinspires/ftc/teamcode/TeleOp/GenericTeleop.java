@@ -15,13 +15,19 @@ import org.firstinspires.ftc.teamcode.FlyWheel.FlyWheelMotorComponent;
 import org.firstinspires.ftc.teamcode.Servo.ServoComponent;
 import org.firstinspires.ftc.teamcode.IntakeMotorComponent;
 import org.firstinspires.ftc.teamcode.Turret.TurretPIDComponent;
+import org.firstinspires.ftc.teamcode.AprilTag.AprilTagLocalization;
+import org.firstinspires.ftc.teamcode.AprilTag.TiltEstimateComponent;
 import org.firstinspires.ftc.teamcode.config.RobotConfig;
 import org.firstinspires.ftc.teamcode.config.RobotControls;
+import org.firstinspires.ftc.teamcode.config.RobotConfig.Vision.HiveCell;
 import org.firstinspires.ftc.teamcode.pedro.Constants;
 
 /**
- * Shared TeleOp implementation. Subclasses only provide the alliance-specific
- * goal X and starting pose — all tuning lives in {@link RobotConfig} and all
+ * Shared TeleOp implementation. Subclasses provide all alliance-specific
+ * picks (goal position, tilt cell, starting pose) from {@link RobotConfig} —
+ * this class never hardcodes a red/blue choice itself.
+ *
+ * <p>All tuning lives in {@link RobotConfig} and all
  * bindings live in {@link RobotControls}.
  *
  * <p>Simplified controls (see {@link RobotControls} to rebind):
@@ -49,6 +55,8 @@ public abstract class GenericTeleop extends OpMode {
     private FlyWheelMotorComponent transfer;
     private ServoComponent kicker;
     private IntakeMotorComponent intake;
+    private AprilTagLocalization aprilTags;
+    private TiltEstimateComponent tiltEstimator;
 
     private Pose startingPose;
 
@@ -59,8 +67,27 @@ public abstract class GenericTeleop extends OpMode {
     private boolean aimingAndSpinning = false;
     private double firingUntilS = 0.0;
 
-    /** Goal X in inches (field frame). Y/height come from {@link RobotConfig}. */
+    /** Alliance goal X in inches (field frame), picked from {@link RobotConfig} by the subclass. */
     protected abstract double getGoalX();
+
+    /** Alliance goal Y in inches (field frame), picked from {@link RobotConfig} by the subclass. */
+    protected abstract double getGoalY();
+
+    /** Alliance goal height in inches, picked from {@link RobotConfig} by the subclass. */
+    protected abstract double getGoalHeight();
+
+    /** Which HIVE CELL to report tilt for, picked from {@link RobotConfig} by the subclass. */
+    protected abstract HiveCell getTargetCell();
+
+    /** Calibrated upright pitch (shared tuning, override only if needed per alliance). */
+    protected double getNormalPitch() {
+        return RobotConfig.Vision.NORMAL_PITCH_DEG;
+    }
+
+    /** Tilt threshold in deg (shared tuning, override only if needed per alliance). */
+    protected double getTiltThreshold() {
+        return RobotConfig.Vision.TILT_THRESHOLD_DEG;
+    }
 
     /** Where localization is seeded at init. */
     protected abstract Pose getStartingPose();
@@ -77,7 +104,8 @@ public abstract class GenericTeleop extends OpMode {
         panels = PanelsTelemetry.INSTANCE.getTelemetry();
 
         double goalX = getGoalX();
-        double goalY = RobotConfig.Field.GOAL_Y;
+        double goalY = getGoalY();
+        double goalHeight = getGoalHeight();
 
         turret = new TurretPIDComponent(
                 hardwareMap,
@@ -89,10 +117,17 @@ public abstract class GenericTeleop extends OpMode {
                 hardwareMap,
                 RobotConfig.Hardware.FLYWHEEL_MOTOR,
                 goalX, goalY,
-                RobotConfig.Field.GOAL_HEIGHT);
+                goalHeight);
         transfer = new FlyWheelMotorComponent(hardwareMap, RobotConfig.Hardware.TRANSFER_MOTOR);
         kicker = new ServoComponent(hardwareMap, RobotConfig.Hardware.LAUNCH_CAP_SERVO);
         intake = new IntakeMotorComponent(hardwareMap, RobotConfig.Hardware.INTAKE_MOTOR);
+        try {
+            aprilTags = new AprilTagLocalization(hardwareMap, telemetry);
+        } catch (Exception e) {
+            aprilTags = null;
+            telemetry.addData("AprilTag vision", "init failed: %s", e.getMessage());
+        }
+        tiltEstimator = new TiltEstimateComponent(getNormalPitch(), getTiltThreshold());
 
         driver = new GamepadEx(gamepad1);
         operator = new GamepadEx(gamepad2);
@@ -114,10 +149,21 @@ public abstract class GenericTeleop extends OpMode {
         handleDrive();
         handleAimAndSpin();
         handleFeed();
+        reportTiltTelemetry();
         reportTelemetry();
 
         panels.update();
         telemetry.update();
+    }
+
+    @Override
+    public void stop() {
+        if (aprilTags != null) {
+            try {
+                aprilTags.close();
+            } catch (Exception ignored) {
+            }
+        }
     }
 
     // ---- input helpers: every binding resolves through RobotControls.
@@ -232,6 +278,35 @@ public abstract class GenericTeleop extends OpMode {
     }
 
     // ---- telemetry ----
+
+    private void reportTiltTelemetry() {
+        HiveCell target = getTargetCell();
+        if (aprilTags == null) {
+            telemetry.addData("Goal tilt", "%s: vision unavailable", target);
+            telemetry.addData("Goal isTilt", "UNKNOWN");
+            panels.debug("tilt/status", target + ": vision unavailable");
+            panels.debug("tilt/isTilt", "UNKNOWN");
+            return;
+        }
+        double pitch = aprilTags.getClusterPitch(target);
+        boolean visible = pitch != AprilTagLocalization.UNKNOWN_PITCH;
+        boolean isTilt = visible && tiltEstimator.isTilted(pitch);
+        String status = visible
+                ? String.format("%s pitch %.1f deg", target, pitch)
+                : String.format("%s not visible", target);
+        String tiltStatus = !visible ? "UNKNOWN" : (isTilt ? "TILTED" : "upright");
+        // Driver Station.
+        telemetry.addData("Goal tilt", status);
+        telemetry.addData("Goal tilt (raw)", visible ? pitch : "UNKNOWN");
+        telemetry.addData("Goal isTilt", "%s (normal %.1f, thr %.1f)", tiltStatus,
+                tiltEstimator.getNormalPitch(), getTiltThreshold());
+        // Panels (uses debug(key, value) — same channel style as position/velocity).
+        panels.debug("tilt/status", status);
+        panels.debug("tilt/isTilt", tiltStatus);
+        if (visible) {
+            panels.debug("tilt/pitchDeg", pitch);
+        }
+    }
 
     private void reportTelemetry() {
         telemetry.addData("Controls",

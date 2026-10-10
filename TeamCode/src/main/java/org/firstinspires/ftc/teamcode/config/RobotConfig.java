@@ -36,14 +36,22 @@ public final class RobotConfig {
         public static boolean FIELD_CENTRIC_DEFAULT = false;
     }
 
-    /** Field / goal geometry, in inches. */
+    /** Field / goal geometry, in inches. Red/blue variants picked by the OpMode subclass. */
     @Configurable
     public static final class Field {
         private Field() {}
 
+        /** Fallback goal used by component default constructors only. OpModes must pick RED/BLUE. */
         public static double GOAL_X = 0.0;
+        /** Fallback goal used by component default constructors only. OpModes must pick RED/BLUE. */
         public static double GOAL_Y = 144.0;
+        /** Shared physical goal height (same structure both alliances). */
         public static double GOAL_HEIGHT = 42.0;
+
+        public static double RED_GOAL_X = 0.0;
+        public static double RED_GOAL_Y = 144.0;
+        public static double BLUE_GOAL_X = 0.0;
+        public static double BLUE_GOAL_Y = 144.0;
     }
 
     /** Intake roller. Negative power = intaking. */
@@ -129,5 +137,75 @@ public final class RobotConfig {
         public static int CAMERA_WIDTH = 640;
         public static int CAMERA_HEIGHT = 480;
         public static boolean ENABLE_LIVE_VIEW = true;
+
+        /** Per-alliance tilt targets. The OpMode subclass picks which one to use. */
+        public static HiveCell RED_TARGET_CELL = HiveCell.RED_SCORING;
+        public static HiveCell BLUE_TARGET_CELL = HiveCell.BLUE_SCORING;
+
+        /** Calibrated upright pitch (deg) for your camera mount. Tune per robot. */
+        public static double NORMAL_PITCH_DEG = 0.0;
+        /** Drop below normal that counts as tilted (deg). */
+        public static double TILT_THRESHOLD_DEG = 3.0;
+
+        /**
+         * The four BIOBUZZ HIVE CELL clusters. Member IDs match the SDK's
+         * {@code AprilTagGameDatabase.getBioBuzzTagLibrary()} exactly:
+         * each cluster holds 4 consecutive tags, and the SDK normally reports
+         * one {@code AprilTagClusterDetection} per cluster (never single
+         * detections for member IDs).
+         */
+        public enum HiveCell {
+            /** IDs 30-33, red CELL, field side opposite the audience. */
+            RED_SCORING("RED SCORING", 30, 31, 32, 33),
+            /** IDs 34-37, red CELL, audience side. */
+            RED_AUDIENCE("RED AUDIENCE", 34, 35, 36, 37),
+            /** IDs 38-41, blue CELL, audience side. */
+            BLUE_AUDIENCE("BLUE AUDIENCE", 38, 39, 40, 41),
+            /** IDs 42-45, blue CELL, field side opposite the audience. */
+            BLUE_SCORING("BLUE SCORING", 42, 43, 44, 45);
+
+            /** Cluster {@code metadata.name} / {@code metadata.shortName} in the SDK library. */
+            public final String clusterName;
+            /** The 4 member tag IDs, in order. */
+            public final int[] memberIds;
+
+            HiveCell(String clusterName, int... memberIds) {
+                this.clusterName = clusterName;
+                this.memberIds = memberIds;
+            }
+
+            /** True when the tag ID belongs to this cluster. */
+            public boolean contains(int tagId) {
+                for (int id : memberIds) {
+                    if (id == tagId) {
+                        return true;
+                    }
+                }
+                return false;
+            }
+
+            /** Finds the cell owning a member tag ID, or null. */
+            public static HiveCell forMemberId(int tagId) {
+                for (HiveCell cell : values()) {
+                    if (cell.contains(tagId)) {
+                        return cell;
+                    }
+                }
+                return null;
+            }
+
+            /** Finds a cell by SDK cluster name/shortName, or null. Matches either field. */
+            public static HiveCell forClusterName(String name) {
+                if (name == null) {
+                    return null;
+                }
+                for (HiveCell cell : values()) {
+                    if (cell.clusterName.equals(name)) {
+                        return cell;
+                    }
+                }
+                return null;
+            }
+        }
     }
 }
