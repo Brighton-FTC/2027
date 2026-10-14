@@ -1,10 +1,11 @@
 package org.firstinspires.ftc.teamcode.Turret;
 
+import com.arcrobotics.ftclib.controller.PIDFController;
+import com.arcrobotics.ftclib.hardware.motors.Motor;
 import com.bylazar.configurables.annotations.Configurable;
 import com.qualcomm.robotcore.hardware.HardwareMap;
 
 import org.firstinspires.ftc.robotcore.external.Telemetry;
-import org.firstinspires.ftc.teamcode.Servo.ServoComponent;
 import org.firstinspires.ftc.teamcode.config.RobotConfig;
 
 import java.util.Objects;
@@ -25,12 +26,13 @@ import java.util.Objects;
 @Configurable
 public class TurretPIDComponent {
 
-    private final ServoComponent turretServo;
+    private final Motor turretMotor;
+    private final PIDFController controller = new PIDFController(0, 0, 0, 0);
     private final Telemetry telemetry;
 
     private final double goalX;
     private final double goalY;
-    private final double degreesPerTick; // 1/1800 Servo pos : [0, 1]
+    private final double degreesPerTick;
 
     /** Uses hardware/field constants from {@link RobotConfig}. */
     public TurretPIDComponent(HardwareMap hardwareMap, Telemetry telemetry) {
@@ -42,39 +44,46 @@ public class TurretPIDComponent {
                 telemetry);
     }
 
-    public TurretPIDComponent(HardwareMap hardwareMap, String servoID,
+    public TurretPIDComponent(HardwareMap hardwareMap, String motorId,
                               double degreesPerTick,
                               double goalX, double goalY,
                               Telemetry telemetry) {
         Objects.requireNonNull(hardwareMap, "hardwareMap");
-        Objects.requireNonNull(servoID, "servoID");
+        Objects.requireNonNull(motorId, "motorId");
         Objects.requireNonNull(telemetry, "telemetry");
         if (!(degreesPerTick > 0)) {
             throw new IllegalArgumentException("degreesPerTick must be > 0");
         }
-        this.turretServo = new ServoComponent(hardwareMap, servoID);
+        this.turretMotor = new Motor(hardwareMap, motorId);
+        this.turretMotor.stopAndResetEncoder();
+        this.turretMotor.setZeroPowerBehavior(Motor.ZeroPowerBehavior.BRAKE);
+        this.turretMotor.setRunMode(Motor.RunMode.RawPower);
         this.degreesPerTick = degreesPerTick;
         this.goalX = goalX;
         this.goalY = goalY;
         this.telemetry = telemetry;
+        applyGains();
     }
 
+    public void resetTurretEncoder() {
+        turretMotor.stopAndResetEncoder();
+    }
+
+    public void stop() {
+        turretMotor.stopMotor();
+    }
 
     /** Current turret angle in degrees, relative to robot forward. */
     public double getCurrentAngle() {
-        return turretServo.getPos();
+        return encoderTicksToAngle(turretMotor.getCurrentPosition());
     }
 
-
-    // GoBuilda Speed Servo 1800 degrees is 0.0005556 ticks per degree 1/1800.
-    public double encoderTicksToAngle(double ticks) {
+    public double encoderTicksToAngle(int ticks) {
         return ticks * degreesPerTick;
     }
 
-
-    // GoBuilda Speed Servo 1800 degrees is 0.0005556 ticks per degree
-    public double angleToEncoderTicks(double degrees) {
-        return degrees / degreesPerTick;
+    public int angleToEncoderTicks(double degrees) {
+        return (int) Math.round(degrees / degreesPerTick);
     }
 
     /**
@@ -82,6 +91,7 @@ public class TurretPIDComponent {
      * The resulting absolute target is clamped to the software end-stops.
      */
     public void turnTurretBy(double deltaDegrees) {
+        applyGains();
         double targetAngle = clampAngle(getCurrentAngle() + deltaDegrees);
         driveToAngle(targetAngle);
     }
@@ -106,6 +116,8 @@ public class TurretPIDComponent {
         telemetry.addData("Turret/relativeDeg", relative);
         telemetry.addData("Turret/targetDeg", clampedTarget);
         telemetry.addData("Turret/currentDeg", getCurrentAngle());
+        telemetry.addData("Turret/errorTicks", controller.getPositionError());
+
         turnTurretBy(toTurn);
     }
 
@@ -121,14 +133,26 @@ public class TurretPIDComponent {
         return Math.abs(clampedTarget - getCurrentAngle()) <= RobotConfig.Turret.AIM_TOLERANCE_DEG;
     }
 
-    public void reset(){
-        turretServo.setDefaultPos();}
+    public double getPIDSetPoint() {
+        return controller.getSetPoint();
+    }
 
     // ---- internals ----
 
     private void driveToAngle(double targetAngleDeg) {
         double targetTicks = angleToEncoderTicks(targetAngleDeg);
-        turretServo.setPos(targetTicks);
+        controller.setSetPoint(targetTicks);
+        double power = clampPower(controller.calculate(turretMotor.getCurrentPosition()));
+        telemetry.addData("Turret/power", power);
+        turretMotor.set(power);
+    }
+
+    private void applyGains() {
+        controller.setPIDF(
+                RobotConfig.Turret.KP,
+                RobotConfig.Turret.KI,
+                RobotConfig.Turret.KD,
+                RobotConfig.Turret.KF);
     }
 
     private static double clampAngle(double angleDeg) {
@@ -150,8 +174,6 @@ public class TurretPIDComponent {
         }
         return angleDeg;
     }
-
-
 
     private static boolean isUnknownPose(double x, double y) {
         double sentinel = RobotConfig.Launcher.UNKNOWN_POSE;
