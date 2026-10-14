@@ -14,9 +14,10 @@ import org.firstinspires.ftc.teamcode.FlyWheel.DynamicAngleComponent;
 import org.firstinspires.ftc.teamcode.FlyWheel.FlyWheelMotorComponent;
 import org.firstinspires.ftc.teamcode.Servo.ServoComponent;
 import org.firstinspires.ftc.teamcode.IntakeMotorComponent;
-import org.firstinspires.ftc.teamcode.Turret.TurretComponent;
+import org.firstinspires.ftc.teamcode.Turret.TurretPIDComponent;
 import org.firstinspires.ftc.teamcode.AprilTag.AprilTagLocalization;
 import org.firstinspires.ftc.teamcode.AprilTag.TiltEstimateComponent;
+import org.firstinspires.ftc.teamcode.Turret.TurretPIDComponent;
 import org.firstinspires.ftc.teamcode.config.RobotConfig;
 import org.firstinspires.ftc.teamcode.config.RobotControls;
 import org.firstinspires.ftc.teamcode.config.RobotConfig.Vision.HiveCell;
@@ -59,7 +60,7 @@ public abstract class GenericTeleop extends OpMode {
     private GamepadEx driver;
     private GamepadEx operator;
 
-    private TurretComponent turret;
+    private TurretPIDComponent turret;
     private DynamicAngleComponent launcher;
     private FlyWheelMotorComponent transfer;
     private ServoComponent launchCap;
@@ -142,7 +143,7 @@ public abstract class GenericTeleop extends OpMode {
 
         panels = PanelsTelemetry.INSTANCE.getTelemetry();
 
-        turret = new TurretComponent(
+        turret = new TurretPIDComponent(
                 hardwareMap,
                 RobotConfig.Hardware.TURRET_MOTOR,
                 RobotConfig.Turret.DEGREES_PER_TICK,
@@ -185,7 +186,6 @@ public abstract class GenericTeleop extends OpMode {
         // Push the (possibly re-switched / dashboard-retuned) goal every loop
         // so turret + shooter track it with no restart.
         if (activeGoal != null) {
-            turret.setGoal(activeGoal);
             launcher.setGoal(activeGoal);
         }
 
