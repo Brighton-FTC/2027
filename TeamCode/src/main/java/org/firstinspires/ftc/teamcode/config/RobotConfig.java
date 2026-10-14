@@ -25,6 +25,9 @@ public final class RobotConfig {
         public static String INTAKE_MOTOR = "intakeMotor";
         public static String LAUNCH_CAP_SERVO = "launchCap";
         public static String WEBCAM_NAME = "Webcam 1";
+
+        public static String RAMP_SERVO = "rampServo";
+
     }
 
     /** Driver / drivetrain behavior. */
@@ -36,22 +39,171 @@ public final class RobotConfig {
         public static boolean FIELD_CENTRIC_DEFAULT = false;
     }
 
-    /** Field / goal geometry, in inches. Red/blue variants picked by the OpMode subclass. */
+    /**
+     * Field / goal geometry, in inches (Pedro 0-144 frame, centre 72,72).
+     * Sourced from BIOBUZZ Competition Manual TU04 (Section 9 ARENA / 10 Game Details / G304):
+     * 144x144 field, HIVE Structure at centre, red HIVE west of centre, blue HIVE east,
+     * each HIVE has SCORING (north) + AUDIENCE (south) CELLs 18.8in apart.
+     * Starts are wall-touching, own-side (red cols A/B/C, blue D/E/F), clear of
+     * LOADING ZONEs / FLOWERs (Fig 11-1).
+     */
     @Configurable
     public static final class Field {
         private Field() {}
 
-        /** Fallback goal used by component default constructors only. OpModes must pick RED/BLUE. */
-        public static double GOAL_X = 0.0;
-        /** Fallback goal used by component default constructors only. OpModes must pick RED/BLUE. */
-        public static double GOAL_Y = 144.0;
-        /** Shared physical goal height (same structure both alliances). */
+        /** Shared physical goal height for ALL 4 CELLs (same HIVE pivots, 43.95in axis). */
         public static double GOAL_HEIGHT = 42.0;
 
-        public static double RED_GOAL_X = 0.0;
-        public static double RED_GOAL_Y = 144.0;
-        public static double BLUE_GOAL_X = 0.0;
-        public static double BLUE_GOAL_Y = 144.0;
+        // ---- goal centres (tunable) ----
+        public static double RED_SCORING_X = 60.0;
+        public static double RED_SCORING_Y = 81.4;
+        public static double RED_AUDIENCE_X = 60.0;
+        public static double RED_AUDIENCE_Y = 62.6;
+        public static double BLUE_SCORING_X = 84.0;
+        public static double BLUE_SCORING_Y = 81.4;
+        public static double BLUE_AUDIENCE_X = 84.0;
+        public static double BLUE_AUDIENCE_Y = 62.6;
+
+        // Legacy single-goal fallback (component default ctors only).
+        public static double GOAL_X = 72.0;
+        public static double GOAL_Y = 72.0;
+        public static double RED_GOAL_X = 60.0;
+        public static double RED_GOAL_Y = 81.4;
+        public static double BLUE_GOAL_X = 84.0;
+        public static double BLUE_GOAL_Y = 81.4;
+
+        // ---- start poses (tunable, deg headings face the HIVE) ----
+        public static double RED_NORTH_X = 36.0;
+        public static double RED_NORTH_Y = 132.0;
+        public static double RED_NORTH_H_DEG = -59.0;
+        public static double RED_SOUTH_X = 36.0;
+        public static double RED_SOUTH_Y = 12.0;
+        public static double RED_SOUTH_H_DEG = 59.0;
+        public static double BLUE_NORTH_X = 108.0;
+        public static double BLUE_NORTH_Y = 132.0;
+        public static double BLUE_NORTH_H_DEG = -121.0;
+        public static double BLUE_SOUTH_X = 108.0;
+        public static double BLUE_SOUTH_Y = 12.0;
+        public static double BLUE_SOUTH_H_DEG = 121.0;
+
+        /** The 4 shootable CELL goals. Heights are always {@link #GOAL_HEIGHT}. */
+        public enum Goal {
+            RED_SCORING,
+            RED_AUDIENCE,
+            BLUE_SCORING,
+            BLUE_AUDIENCE;
+
+            public double x() {
+                switch (this) {
+                    case RED_SCORING: return RED_SCORING_X;
+                    case RED_AUDIENCE: return RED_AUDIENCE_X;
+                    case BLUE_SCORING: return BLUE_SCORING_X;
+                    case BLUE_AUDIENCE: return BLUE_AUDIENCE_X;
+                }
+                throw new AssertionError(this);
+            }
+
+            public double y() {
+                switch (this) {
+                    case RED_SCORING: return RED_SCORING_Y;
+                    case RED_AUDIENCE: return RED_AUDIENCE_Y;
+                    case BLUE_SCORING: return BLUE_SCORING_Y;
+                    case BLUE_AUDIENCE: return BLUE_AUDIENCE_Y;
+                }
+                throw new AssertionError(this);
+            }
+
+            public double height() {
+                return GOAL_HEIGHT;
+            }
+
+            public boolean isRed() {
+                return this == RED_SCORING || this == RED_AUDIENCE;
+            }
+
+            public boolean isBlue() {
+                return !isRed();
+            }
+
+            /** Matching tilt/vision cell. */
+            public Vision.HiveCell cell() {
+                switch (this) {
+                    case RED_SCORING: return Vision.HiveCell.RED_SCORING;
+                    case RED_AUDIENCE: return Vision.HiveCell.RED_AUDIENCE;
+                    case BLUE_SCORING: return Vision.HiveCell.BLUE_SCORING;
+                    case BLUE_AUDIENCE: return Vision.HiveCell.BLUE_AUDIENCE;
+                }
+                throw new AssertionError(this);
+            }
+
+            /** The other CELL on the same HIVE (for HIVE-TIP switching). */
+            public Goal otherEndOfHive() {
+                switch (this) {
+                    case RED_SCORING: return RED_AUDIENCE;
+                    case RED_AUDIENCE: return RED_SCORING;
+                    case BLUE_SCORING: return BLUE_AUDIENCE;
+                    case BLUE_AUDIENCE: return BLUE_SCORING;
+                }
+                throw new AssertionError(this);
+            }
+        }
+
+        /** The 4 legal wall-touching starts (Fig 11-1). */
+        public enum Start {
+            RED_NORTH,
+            RED_SOUTH,
+            BLUE_NORTH,
+            BLUE_SOUTH;
+
+            public double x() {
+                switch (this) {
+                    case RED_NORTH: return RED_NORTH_X;
+                    case RED_SOUTH: return RED_SOUTH_X;
+                    case BLUE_NORTH: return BLUE_NORTH_X;
+                    case BLUE_SOUTH: return BLUE_SOUTH_X;
+                }
+                throw new AssertionError(this);
+            }
+
+            public double y() {
+                switch (this) {
+                    case RED_NORTH: return RED_NORTH_Y;
+                    case RED_SOUTH: return RED_SOUTH_Y;
+                    case BLUE_NORTH: return BLUE_NORTH_Y;
+                    case BLUE_SOUTH: return BLUE_SOUTH_Y;
+                }
+                throw new AssertionError(this);
+            }
+
+            public double headingDeg() {
+                switch (this) {
+                    case RED_NORTH: return RED_NORTH_H_DEG;
+                    case RED_SOUTH: return RED_SOUTH_H_DEG;
+                    case BLUE_NORTH: return BLUE_NORTH_H_DEG;
+                    case BLUE_SOUTH: return BLUE_SOUTH_H_DEG;
+                }
+                throw new AssertionError(this);
+            }
+
+            public double headingRad() {
+                return Math.toRadians(headingDeg());
+            }
+
+            public boolean isRed() {
+                return this == RED_NORTH || this == RED_SOUTH;
+            }
+
+            /** Closest goal (north start -> SCORING cell, south start -> AUDIENCE cell). */
+            public Goal defaultGoal() {
+                switch (this) {
+                    case RED_NORTH: return Goal.RED_SCORING;
+                    case RED_SOUTH: return Goal.RED_AUDIENCE;
+                    case BLUE_NORTH: return Goal.BLUE_SCORING;
+                    case BLUE_SOUTH: return Goal.BLUE_AUDIENCE;
+                }
+                throw new AssertionError(this);
+            }
+        }
     }
 
     /** Intake roller. Negative power = intaking. */

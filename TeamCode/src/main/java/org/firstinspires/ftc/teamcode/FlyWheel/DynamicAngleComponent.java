@@ -21,9 +21,9 @@ import java.util.Objects;
 public class DynamicAngleComponent {
 
     private final FlyWheelMotorPIDComponent flywheel;
-    private final double goalX;
-    private final double goalY;
-    private final double goalHeight;
+    private double goalX;
+    private double goalY;
+    private double goalHeight;
 
     private double targetRpm = 0.0;
 
@@ -81,6 +81,18 @@ public class DynamicAngleComponent {
     public void stop() {
         commandRpm(0.0);
         flywheel.stopMotor();
+    }
+
+    /** Retarget mid-match (e.g. HIVE TIP switches SCORING <-> AUDIENCE CELL). */
+    public void setGoal(double goalX, double goalY, double goalHeight) {
+        this.goalX = goalX;
+        this.goalY = goalY;
+        this.goalHeight = goalHeight;
+    }
+
+    /** Retarget via config enum (reads current dashboard-tuned XY + shared height). */
+    public void setGoal(RobotConfig.Field.Goal goal) {
+        setGoal(goal.x(), goal.y(), goal.height());
     }
 
     /** Last commanded wheel speed in RPM (0 when holding stopped). */
