@@ -77,7 +77,7 @@ public final class RobotControls {
      */
     public static GamepadKeys.Button FIRE_BUTTON = PSButtons.TRIANGLE;
     /** How long (seconds) the kicker stays open per FIRE press. */
-    public static double FIRE_KICK_SECONDS = 0.35;
+    public static double FIRE_KICK_SECONDS = 2;
 
     /**
      * Hold to unclog: reverses intake + transfer and forces the kicker closed.
@@ -87,4 +87,6 @@ public final class RobotControls {
 
 
     public static GamepadKeys.Button RAMP_BUTTON = GamepadKeys.Button.DPAD_UP;
+
+    public static GamepadKeys.Button UMBRELLA_BUTTON = GamepadKeys.Button.DPAD_LEFT;
 }

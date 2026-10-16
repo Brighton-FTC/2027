@@ -65,6 +65,7 @@ public abstract class GenericTeleop extends OpMode {
     private FlyWheelMotorComponent transfer;
     private ServoComponent launchCap;
     private ServoComponent rampServo;
+    private ServoComponent umbrellaServo;
     private IntakeMotorComponent intake;
     private AprilTagLocalization aprilTags;
     private TiltEstimateComponent tiltEstimator;
@@ -77,6 +78,7 @@ public abstract class GenericTeleop extends OpMode {
     private boolean slowModeToggle = false;
     private boolean aimingAndSpinning = false;
     private double firingUntilS = 0.0;
+    private boolean toggledUmbrella = false;
 
     /** Dynamic target — switch mid-match as the HIVE tips / game evolves. */
     protected volatile Goal activeGoal;
@@ -155,9 +157,11 @@ public abstract class GenericTeleop extends OpMode {
                 activeGoal.x(), activeGoal.y(),
                 activeGoal.height());
         transfer = new FlyWheelMotorComponent(hardwareMap, RobotConfig.Hardware.TRANSFER_MOTOR);
-        launchCap = new ServoComponent(hardwareMap, RobotConfig.Hardware.LAUNCH_CAP_SERVO);
+        launchCap = new ServoComponent(hardwareMap, RobotConfig.Hardware.LAUNCH_CAP_SERVO, RobotConfig.ServoPose.LAUNCH_CAP_OPEN_POSITION, RobotConfig.ServoPose.LAUNCH_CAP_CLOSED_POSITION, RobotConfig.ServoPose.LAUNCH_CAP_CLOSED_POSITION);
         intake = new IntakeMotorComponent(hardwareMap, RobotConfig.Hardware.INTAKE_MOTOR);
-        rampServo = new ServoComponent(hardwareMap, RobotConfig.Hardware.RAMP_SERVO);
+        rampServo = new ServoComponent(hardwareMap, RobotConfig.Hardware.RAMP_SERVO, RobotConfig.ServoPose.RAMP_OPEN_POSITION, RobotConfig.ServoPose.RAMP_CLOSED_POSITION, RobotConfig.ServoPose.RAMP_CLOSED_POSITION);
+        umbrellaServo = new ServoComponent(hardwareMap, RobotConfig.Hardware.UMBRELLA_SERVO, RobotConfig.ServoPose.UMBRELLA_OPEN_POSITION, RobotConfig.ServoPose.UMBRELLA_CLOSED_POSITION, RobotConfig.ServoPose.UMBRELLA_CLOSED_POSITION);
+
         try {
             aprilTags = new AprilTagLocalization(hardwareMap, telemetry);
         } catch (Exception e) {
@@ -183,12 +187,8 @@ public abstract class GenericTeleop extends OpMode {
         driver.readButtons();
         operator.readButtons();
 
-        // Push the (possibly re-switched / dashboard-retuned) goal every loop
-        // so turret + shooter track it with no restart.
-        if (activeGoal != null) {
-            launcher.setGoal(activeGoal);
-        }
-
+        updateShooterGoal();
+        handleUmbrella();
         handleDrive();
         handleAimAndSpin();
         handleFeed();
@@ -325,6 +325,29 @@ public abstract class GenericTeleop extends OpMode {
         telemetry.addData("launchCap open", launchCap.isOpen());
     }
 
+    private void updateShooterGoal(){
+        // Push the (possibly re-switched / dashboard-retuned) goal every loop
+        // so turret + shooter track it with no restart.
+        if (isTilt()){
+            switchGoalForHiveTip();
+        }
+        if (activeGoal != null) {
+            launcher.setGoal(activeGoal);
+            turret.setGoal(activeGoal);
+        }
+    }
+
+    private void handleUmbrella(){
+        if (operatorJustPressed(RobotControls.UMBRELLA_BUTTON) && !toggledUmbrella){
+            umbrellaServo.open();
+            toggledUmbrella = !toggledUmbrella;
+        }
+        else if (operatorJustPressed(RobotControls.UMBRELLA_BUTTON) && toggledUmbrella){
+            umbrellaServo.close();
+            toggledUmbrella = !toggledUmbrella;
+        }
+    }
+
     // ---- telemetry ----
 
     private void reportTiltTelemetry() {
@@ -384,5 +407,12 @@ public abstract class GenericTeleop extends OpMode {
 
     private double poseHeading() {
         return follower.pose().heading();
+    }
+
+    public boolean isTilt(){
+        HiveCell target = getTargetCell();
+        double pitch = aprilTags.getClusterPitch(target);
+        boolean visible = pitch != AprilTagLocalization.UNKNOWN_PITCH;
+        return visible && tiltEstimator.isTilted(pitch);
     }
 }

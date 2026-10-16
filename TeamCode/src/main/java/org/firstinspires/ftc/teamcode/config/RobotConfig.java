@@ -28,6 +28,8 @@ public final class RobotConfig {
 
         public static String RAMP_SERVO = "rampServo";
 
+        public static String UMBRELLA_SERVO = "umbrellaServo";
+
     }
 
     /** Driver / drivetrain behavior. */
@@ -279,11 +281,17 @@ public final class RobotConfig {
 
     /** Kicker / cap servo that pushes a ball into the flywheel. */
     @Configurable
-    public static final class Kicker {
-        private Kicker() {}
+    public static final class ServoPose {
+        private ServoPose() {}
 
-        public static double OPEN_POSITION = 1.0;
-        public static double CLOSED_POSITION = 0.0;
+        public static double LAUNCH_CAP_OPEN_POSITION = 1.0;
+        public static double LAUNCH_CAP_CLOSED_POSITION = 0.0;
+
+        public static double RAMP_OPEN_POSITION = 1.0;
+        public static double RAMP_CLOSED_POSITION = 0.0;
+
+        public static double UMBRELLA_OPEN_POSITION = 1.0;
+        public static double UMBRELLA_CLOSED_POSITION = 0.0;
     }
 
     /** Vision / AprilTag camera. */

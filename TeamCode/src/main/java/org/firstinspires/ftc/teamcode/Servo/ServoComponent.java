@@ -14,14 +14,6 @@ public class ServoComponent {
     private final double defaultPos;
     private boolean open = false;
 
-    /** Kicker servo, using RobotConfig.Kicker positions. Starts closed. */
-    public ServoComponent(HardwareMap hardwareMap, String servoId) {
-        this(hardwareMap, servoId,
-                RobotConfig.Kicker.OPEN_POSITION,
-                RobotConfig.Kicker.CLOSED_POSITION,
-                RobotConfig.Kicker.CLOSED_POSITION);
-    }
-
     /** Any servo with its own positions. Starts at default. */
     public ServoComponent(HardwareMap hardwareMap, String servoId,
                           double openPos, double closedPos, double defaultPos) {
