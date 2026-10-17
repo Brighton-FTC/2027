@@ -27,14 +27,6 @@ public class DynamicAngleComponent {
 
     private double targetRpm = 0.0;
 
-    /** Uses hardware/field constants from {@link RobotConfig}. */
-    public DynamicAngleComponent(HardwareMap hardwareMap) {
-        this(hardwareMap,
-                RobotConfig.Hardware.FLYWHEEL_MOTOR,
-                RobotConfig.Field.GOAL_X,
-                RobotConfig.Field.GOAL_Y,
-                RobotConfig.Field.GOAL_HEIGHT);
-    }
 
     public DynamicAngleComponent(HardwareMap hardwareMap, String flywheelMotorId,
                                  double goalX, double goalY, double goalHeight) {

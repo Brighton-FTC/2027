@@ -66,13 +66,6 @@ public final class RobotConfig {
         public static double BLUE_AUDIENCE_X = 84.0;
         public static double BLUE_AUDIENCE_Y = 62.6;
 
-        // Legacy single-goal fallback (component default ctors only).
-        public static double GOAL_X = 72.0;
-        public static double GOAL_Y = 72.0;
-        public static double RED_GOAL_X = 60.0;
-        public static double RED_GOAL_Y = 81.4;
-        public static double BLUE_GOAL_X = 84.0;
-        public static double BLUE_GOAL_Y = 81.4;
 
         // ---- start poses (tunable, deg headings face the HIVE) ----
         public static double RED_NORTH_X = 36.0;

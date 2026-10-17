@@ -34,15 +34,6 @@ public class TurretPIDComponent {
     private double goalY;
     private final double degreesPerTick;
 
-    /** Uses hardware/field constants from {@link RobotConfig}. */
-    public TurretPIDComponent(HardwareMap hardwareMap, Telemetry telemetry) {
-        this(hardwareMap,
-                RobotConfig.Hardware.TURRET_MOTOR,
-                RobotConfig.Turret.DEGREES_PER_TICK,
-                RobotConfig.Field.GOAL_X,
-                RobotConfig.Field.GOAL_Y,
-                telemetry);
-    }
 
     public TurretPIDComponent(HardwareMap hardwareMap, String motorId,
                               double degreesPerTick,
