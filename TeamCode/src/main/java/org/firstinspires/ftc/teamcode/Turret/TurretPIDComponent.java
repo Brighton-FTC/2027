@@ -30,19 +30,10 @@ public class TurretPIDComponent {
     private final PIDFController controller = new PIDFController(0, 0, 0, 0);
     private final Telemetry telemetry;
 
-    private final double goalX;
-    private final double goalY;
+    private double goalX;
+    private double goalY;
     private final double degreesPerTick;
 
-    /** Uses hardware/field constants from {@link RobotConfig}. */
-    public TurretPIDComponent(HardwareMap hardwareMap, Telemetry telemetry) {
-        this(hardwareMap,
-                RobotConfig.Hardware.TURRET_MOTOR,
-                RobotConfig.Turret.DEGREES_PER_TICK,
-                RobotConfig.Field.GOAL_X,
-                RobotConfig.Field.GOAL_Y,
-                telemetry);
-    }
 
     public TurretPIDComponent(HardwareMap hardwareMap, String motorId,
                               double degreesPerTick,
@@ -178,5 +169,14 @@ public class TurretPIDComponent {
     private static boolean isUnknownPose(double x, double y) {
         double sentinel = RobotConfig.Launcher.UNKNOWN_POSE;
         return x == sentinel || y == sentinel;
+    }
+
+    public void setGoal(RobotConfig.Field.Goal goal) {
+        setGoal(goal.x(), goal.y());
+    }
+
+    public void setGoal(double goalX, double goalY) {
+        this.goalX = goalX;
+        this.goalY = goalY;
     }
 }

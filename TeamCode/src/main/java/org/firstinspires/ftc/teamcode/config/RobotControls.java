@@ -3,6 +3,8 @@ package org.firstinspires.ftc.teamcode.config;
 import com.arcrobotics.ftclib.gamepad.GamepadKeys;
 import com.bylazar.configurables.annotations.Configurable;
 
+import org.firstinspires.ftc.teamcode.PSButtons;
+
 /**
  * Single place to configure robot controls.
  *
@@ -11,15 +13,22 @@ import com.bylazar.configurables.annotations.Configurable;
  * bindings can be changed without touching logic code. Gamepads are fixed by
  * role: driver actions live on gamepad1, operator actions on gamepad2.
  *
+ * <p>Buttons use PlayStation names via {@link PSButtons} — same class as
+ * {@code Brighton-FTC/2026}. Face buttons MUST use {@link PSButtons}
+ * ({@code SQUARE}, {@code CROSS}, {@code CIRCLE}, {@code TRIANGLE},
+ * {@code SHARE}, {@code OPTIONS}); bumpers / sticks / D-pad have no PS alias
+ * so they use {@link GamepadKeys.Button} directly (same pattern as the
+ * reference repo).
+ *
  * <p>Simplified default scheme (intuitive roles):
  * <ul>
- *   <li>Driver (gamepad1): sticks drive, {@link #SLOW_BUTTON} held for
- *       slow mode, {@link #FIELD_CENTRIC_BUTTON} toggles centricity.</li>
- *   <li>Operator (gamepad2): {@link #COLLECT_BUTTON} held to collect
+ *   <li>Driver (gamepad1): sticks drive, {@link #SLOW_BUTTON} (RIGHT_BUMPER) held for
+ *       slow mode, {@link #FIELD_CENTRIC_BUTTON} (SQUARE) toggles centricity.</li>
+ *   <li>Operator (gamepad2): {@link #COLLECT_BUTTON} (CROSS) held to collect
  *       (intake + transfer + kicker feed together), {@link #AIM_AND_SPIN_BUTTON}
- *       toggles turret auto-aim + flywheel spin-up together (never one without
- *       the other), {@link #FIRE_BUTTON} kicks one shot, {@link #UNCLOG_BUTTON}
- *       held to reverse the feed path.</li>
+ *       (CIRCLE) toggles turret auto-aim + flywheel spin-up together (never one
+ *       without the other), {@link #FIRE_BUTTON} (TRIANGLE) kicks one shot,
+ *       {@link #UNCLOG_BUTTON} (DPAD_DOWN) held to reverse the feed path.</li>
  * </ul>
  *
  * <p>HOLD actions run only while held (release auto-stops — nothing gets stuck
@@ -42,7 +51,7 @@ public final class RobotControls {
     public static boolean SLOW_IS_TOGGLE = false;
 
     /** Press to toggle field-centric / robot-centric driving. */
-    public static GamepadKeys.Button FIELD_CENTRIC_BUTTON = GamepadKeys.Button.X;
+    public static GamepadKeys.Button FIELD_CENTRIC_BUTTON = PSButtons.SQUARE;
 
     // ---- operator (gamepad2) ----
 
@@ -51,7 +60,7 @@ public final class RobotControls {
      * Release stops everything and closes the kicker. One button replaces the
      * old intake-toggle / transfer-toggle / combo / kicker-open-close cluster.
      */
-    public static GamepadKeys.Button COLLECT_BUTTON = GamepadKeys.Button.A;
+    public static GamepadKeys.Button COLLECT_BUTTON = PSButtons.CROSS;
     /** Whether COLLECT also opens the kicker to feed the shooter. */
     public static boolean COLLECT_OPENS_KICKER = true;
 
@@ -60,19 +69,24 @@ public final class RobotControls {
      * deliberately linked — aiming without spinning (or vice versa) is never
      * useful, so one button owns both.
      */
-    public static GamepadKeys.Button AIM_AND_SPIN_BUTTON = GamepadKeys.Button.B;
+    public static GamepadKeys.Button AIM_AND_SPIN_BUTTON = PSButtons.CIRCLE;
 
     /**
      * Press to fire: opens the kicker for {@link #FIRE_KICK_SECONDS}, then it
      * auto-closes. Ignored while {@link #UNCLOG_BUTTON} is held.
      */
-    public static GamepadKeys.Button FIRE_BUTTON = GamepadKeys.Button.Y;
+    public static GamepadKeys.Button FIRE_BUTTON = PSButtons.TRIANGLE;
     /** How long (seconds) the kicker stays open per FIRE press. */
-    public static double FIRE_KICK_SECONDS = 0.35;
+    public static double FIRE_KICK_SECONDS = 2;
 
     /**
      * Hold to unclog: reverses intake + transfer and forces the kicker closed.
      * Release auto-stops. Takes precedence over COLLECT while both are held.
      */
     public static GamepadKeys.Button UNCLOG_BUTTON = GamepadKeys.Button.DPAD_DOWN;
+
+
+    public static GamepadKeys.Button RAMP_BUTTON = GamepadKeys.Button.DPAD_UP;
+
+    public static GamepadKeys.Button UMBRELLA_BUTTON = GamepadKeys.Button.DPAD_LEFT;
 }

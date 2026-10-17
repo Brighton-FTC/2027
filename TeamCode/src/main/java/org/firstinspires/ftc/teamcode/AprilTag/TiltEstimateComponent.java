@@ -26,10 +26,6 @@ public class TiltEstimateComponent {
         this.thresholdDeg = thresholdDeg;
     }
 
-    public boolean isDown(double degrees){
-        return isTilted(degrees);
-    }
-
     public boolean isTilted(double measuredPitch){
         if (measuredPitch == UNKNOWN) {
             return false;

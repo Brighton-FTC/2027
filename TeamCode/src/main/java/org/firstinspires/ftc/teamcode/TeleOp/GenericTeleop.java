@@ -17,26 +17,36 @@ import org.firstinspires.ftc.teamcode.IntakeMotorComponent;
 import org.firstinspires.ftc.teamcode.Turret.TurretPIDComponent;
 import org.firstinspires.ftc.teamcode.AprilTag.AprilTagLocalization;
 import org.firstinspires.ftc.teamcode.AprilTag.TiltEstimateComponent;
+import org.firstinspires.ftc.teamcode.Turret.TurretPIDComponent;
 import org.firstinspires.ftc.teamcode.config.RobotConfig;
 import org.firstinspires.ftc.teamcode.config.RobotControls;
 import org.firstinspires.ftc.teamcode.config.RobotConfig.Vision.HiveCell;
+import org.firstinspires.ftc.teamcode.config.RobotConfig.Field.Goal;
+import org.firstinspires.ftc.teamcode.config.RobotConfig.Field.Start;
 import org.firstinspires.ftc.teamcode.pedro.Constants;
 
 /**
- * Shared TeleOp implementation. Subclasses provide all alliance-specific
- * picks (goal position, tilt cell, starting pose) from {@link RobotConfig} —
+ * Shared TeleOp implementation. Subclasses pick one {@link Start} and one
+ * initial {@link Goal} from {@link RobotConfig.Field} (BIOBUZZ manual TU04) —
  * this class never hardcodes a red/blue choice itself.
+ *
+ * <p>Goals/starts stay dynamic: {@link #activeGoal} is re-read from
+ * {@link RobotConfig} every loop and pushed into the turret/launcher, so
+ * dashboard retunes and mid-match switches (HIVE TIP -> other CELL, auto
+ * routines, gamepad overrides) take effect immediately. Call
+ * {@link #setActiveGoal(Goal)} / {@link #switchGoalForHiveTip()} from subclass
+ * code or future game-logic hooks.
  *
  * <p>All tuning lives in {@link RobotConfig} and all
  * bindings live in {@link RobotControls}.
  *
- * <p>Simplified controls (see {@link RobotControls} to rebind):
+ * <p>Simplified controls (see {@link RobotControls} to rebind, PlayStation names):
  * <ul>
  *   <li>Driver: left stick = drive/strafe, right stick X = turn,
- *       hold SLOW for slow mode, press FIELD_CENTRIC to toggle centricity.</li>
- *   <li>Operator: hold COLLECT to run intake + transfer + kicker together,
- *       press AIM_AND_SPIN to toggle turret auto-aim + flywheel together,
- *       press FIRE to kick one shot, hold UNCLOG to reverse the feed.</li>
+ *       hold SLOW (RIGHT_BUMPER) for slow mode, press FIELD_CENTRIC (SQUARE) to toggle centricity.</li>
+ *   <li>Operator: hold COLLECT (CROSS) to run intake + transfer + launchCap together,
+ *       press AIM_AND_SPIN (CIRCLE) to toggle turret auto-aim + flywheel together,
+ *       press FIRE (TRIANGLE) to kick one shot, hold UNCLOG (DPAD_DOWN) to reverse the feed.</li>
  * </ul>
  *
  * <p>HOLD actions are level-driven (release auto-stops, nothing latches on);
@@ -53,7 +63,9 @@ public abstract class GenericTeleop extends OpMode {
     private TurretPIDComponent turret;
     private DynamicAngleComponent launcher;
     private FlyWheelMotorComponent transfer;
-    private ServoComponent kicker;
+    private ServoComponent launchCap;
+    private ServoComponent rampServo;
+    private ServoComponent umbrellaServo;
     private IntakeMotorComponent intake;
     private AprilTagLocalization aprilTags;
     private TiltEstimateComponent tiltEstimator;
@@ -66,18 +78,44 @@ public abstract class GenericTeleop extends OpMode {
     private boolean slowModeToggle = false;
     private boolean aimingAndSpinning = false;
     private double firingUntilS = 0.0;
+    private boolean toggledUmbrella = false;
 
-    /** Alliance goal X in inches (field frame), picked from {@link RobotConfig} by the subclass. */
-    protected abstract double getGoalX();
+    /** Dynamic target — switch mid-match as the HIVE tips / game evolves. */
+    protected volatile Goal activeGoal;
 
-    /** Alliance goal Y in inches (field frame), picked from {@link RobotConfig} by the subclass. */
-    protected abstract double getGoalY();
+    /** Which wall-touching start this OpMode uses (one of the 4 manual spots). */
+    protected abstract Start getStart();
 
-    /** Alliance goal height in inches, picked from {@link RobotConfig} by the subclass. */
-    protected abstract double getGoalHeight();
+    /** Goal aimed at init; becomes {@link #activeGoal} (switchable later). */
+    protected abstract Goal getInitialGoal();
 
-    /** Which HIVE CELL to report tilt for, picked from {@link RobotConfig} by the subclass. */
-    protected abstract HiveCell getTargetCell();
+    /** Current goal XY/height, always read live from {@link RobotConfig} tuning. */
+    protected Goal getActiveGoal() {
+        return activeGoal;
+    }
+
+    /** Retarget mid-match (e.g. HIVE TIP, auto routine, gamepad override). */
+    protected void setActiveGoal(Goal goal) {
+        if (goal != null) {
+            activeGoal = goal;
+        }
+    }
+
+    /** Flip to the other CELL on the same HIVE (SCORING <-> AUDIENCE). */
+    protected void switchGoalForHiveTip() {
+        if (activeGoal != null) {
+            activeGoal = activeGoal.otherEndOfHive();
+        }
+    }
+
+    protected boolean isRedAlliance() {
+        return getStart().isRed();
+    }
+
+    /** Tilt cell follows the active goal so vision stays consistent. */
+    protected HiveCell getTargetCell() {
+        return activeGoal != null ? activeGoal.cell() : getInitialGoal().cell();
+    }
 
     /** Calibrated upright pitch (shared tuning, override only if needed per alliance). */
     protected double getNormalPitch() {
@@ -89,12 +127,16 @@ public abstract class GenericTeleop extends OpMode {
         return RobotConfig.Vision.TILT_THRESHOLD_DEG;
     }
 
-    /** Where localization is seeded at init. */
-    protected abstract Pose getStartingPose();
+    /** Where localization is seeded at init — built live from {@link #getStart()} so dashboard edits apply. */
+    protected Pose getStartingPose() {
+        Start s = getStart();
+        return new Pose(s.x(), s.y(), s.headingRad());
+    }
 
     @Override
     public void init() {
         fieldCentric = RobotConfig.Drive.FIELD_CENTRIC_DEFAULT;
+        activeGoal = getInitialGoal();
         startingPose = getStartingPose();
 
         follower = Constants.createFollower(hardwareMap);
@@ -103,24 +145,23 @@ public abstract class GenericTeleop extends OpMode {
 
         panels = PanelsTelemetry.INSTANCE.getTelemetry();
 
-        double goalX = getGoalX();
-        double goalY = getGoalY();
-        double goalHeight = getGoalHeight();
-
         turret = new TurretPIDComponent(
                 hardwareMap,
                 RobotConfig.Hardware.TURRET_MOTOR,
                 RobotConfig.Turret.DEGREES_PER_TICK,
-                goalX, goalY,
+                activeGoal.x(), activeGoal.y(),
                 telemetry);
         launcher = new DynamicAngleComponent(
                 hardwareMap,
                 RobotConfig.Hardware.FLYWHEEL_MOTOR,
-                goalX, goalY,
-                goalHeight);
+                activeGoal.x(), activeGoal.y(),
+                activeGoal.height());
         transfer = new FlyWheelMotorComponent(hardwareMap, RobotConfig.Hardware.TRANSFER_MOTOR);
-        kicker = new ServoComponent(hardwareMap, RobotConfig.Hardware.LAUNCH_CAP_SERVO);
+        launchCap = new ServoComponent(hardwareMap, RobotConfig.Hardware.LAUNCH_CAP_SERVO, RobotConfig.ServoPose.LAUNCH_CAP_OPEN_POSITION, RobotConfig.ServoPose.LAUNCH_CAP_CLOSED_POSITION, RobotConfig.ServoPose.LAUNCH_CAP_CLOSED_POSITION);
         intake = new IntakeMotorComponent(hardwareMap, RobotConfig.Hardware.INTAKE_MOTOR);
+        rampServo = new ServoComponent(hardwareMap, RobotConfig.Hardware.RAMP_SERVO, RobotConfig.ServoPose.RAMP_OPEN_POSITION, RobotConfig.ServoPose.RAMP_CLOSED_POSITION, RobotConfig.ServoPose.RAMP_CLOSED_POSITION);
+        umbrellaServo = new ServoComponent(hardwareMap, RobotConfig.Hardware.UMBRELLA_SERVO, RobotConfig.ServoPose.UMBRELLA_OPEN_POSITION, RobotConfig.ServoPose.UMBRELLA_CLOSED_POSITION, RobotConfig.ServoPose.UMBRELLA_CLOSED_POSITION);
+
         try {
             aprilTags = new AprilTagLocalization(hardwareMap, telemetry);
         } catch (Exception e) {
@@ -146,6 +187,8 @@ public abstract class GenericTeleop extends OpMode {
         driver.readButtons();
         operator.readButtons();
 
+        updateShooterGoal();
+        handleUmbrella();
         handleDrive();
         handleAimAndSpin();
         handleFeed();
@@ -235,23 +278,27 @@ public abstract class GenericTeleop extends OpMode {
         telemetry.addData("Turret deg", turret.getCurrentAngle());
     }
 
-    // ---- intake / transfer / kicker (one feed path) ----
+    // ---- intake / transfer / launchCap (one feed path) ----
 
     private void handleFeed() {
         boolean unclog = operatorHeld(RobotControls.UNCLOG_BUTTON);
         boolean collect = !unclog && operatorHeld(RobotControls.COLLECT_BUTTON);
-
+        if (operatorHeld(RobotControls.RAMP_BUTTON)) {
+            rampServo.open();
+        } else {
+            rampServo.close();
+        }
         if (unclog) {
-            // Unclog wins over everything: reverse the path, force kicker shut.
+            // Unclog wins over everything: reverse the path, force launchCap shut.
             intake.reverseMotor();
             transfer.runMotorAt(RobotConfig.Transfer.REVERSE_POWER);
-            kicker.close();
+            launchCap.close();
             firingUntilS = 0.0;
         } else if (collect) {
             intake.startMotor();
             transfer.runMotorAt(RobotConfig.Transfer.FORWARD_POWER);
             if (RobotControls.COLLECT_OPENS_KICKER) {
-                kicker.open();
+                launchCap.open();
             }
             firingUntilS = 0.0;
         } else {
@@ -259,23 +306,46 @@ public abstract class GenericTeleop extends OpMode {
             transfer.stopMotor();
 
             if (operatorJustPressed(RobotControls.FIRE_BUTTON)) {
-                kicker.open();
+                launchCap.open();
                 firingUntilS = getRuntime() + Math.max(0.0, RobotControls.FIRE_KICK_SECONDS);
             } else if (firingUntilS != 0.0) {
                 if (getRuntime() >= firingUntilS) {
-                    kicker.close();
+                    launchCap.close();
                     firingUntilS = 0.0;
                 }
             } else {
-                // Safe default: kicker stays shut when idle (e.g. after COLLECT
+                // Safe default: launchCap stays shut when idle (e.g. after COLLECT
                 // is released) so staged balls can't dribble into the wheel.
-                kicker.close();
+                launchCap.close();
             }
         }
 
         telemetry.addData("Collecting", collect);
         telemetry.addData("Unclogging", unclog);
-        telemetry.addData("Kicker open", kicker.isOpen());
+        telemetry.addData("launchCap open", launchCap.isOpen());
+    }
+
+    private void updateShooterGoal(){
+        // Push the (possibly re-switched / dashboard-retuned) goal every loop
+        // so turret + shooter track it with no restart.
+        if (isTilt()){
+            switchGoalForHiveTip();
+        }
+        if (activeGoal != null) {
+            launcher.setGoal(activeGoal);
+            turret.setGoal(activeGoal);
+        }
+    }
+
+    private void handleUmbrella(){
+        if (operatorJustPressed(RobotControls.UMBRELLA_BUTTON) && !toggledUmbrella){
+            umbrellaServo.open();
+            toggledUmbrella = !toggledUmbrella;
+        }
+        else if (operatorJustPressed(RobotControls.UMBRELLA_BUTTON) && toggledUmbrella){
+            umbrellaServo.close();
+            toggledUmbrella = !toggledUmbrella;
+        }
     }
 
     // ---- telemetry ----
@@ -315,6 +385,14 @@ public abstract class GenericTeleop extends OpMode {
                 RobotControls.SLOW_BUTTON, RobotControls.FIELD_CENTRIC_BUTTON,
                 RobotControls.COLLECT_BUTTON, RobotControls.AIM_AND_SPIN_BUTTON,
                 RobotControls.FIRE_BUTTON, RobotControls.UNCLOG_BUTTON);
+        telemetry.addData("Start", "%s (%.1f, %.1f, %.0f deg)",
+                getStart(), getStart().x(), getStart().y(),
+                getStart().headingDeg());
+        if (activeGoal != null) {
+            telemetry.addData("Goal", "%s (%.1f, %.1f, h=%.1f) -> %s",
+                    activeGoal, activeGoal.x(), activeGoal.y(),
+                    activeGoal.height(), activeGoal.cell());
+        }
         panels.debug("position", follower.pose());
         panels.debug("velocity", follower.velocity());
     }
@@ -329,5 +407,12 @@ public abstract class GenericTeleop extends OpMode {
 
     private double poseHeading() {
         return follower.pose().heading();
+    }
+
+    public boolean isTilt(){
+        HiveCell target = getTargetCell();
+        double pitch = aprilTags.getClusterPitch(target);
+        boolean visible = pitch != AprilTagLocalization.UNKNOWN_PITCH;
+        return visible && tiltEstimator.isTilted(pitch);
     }
 }

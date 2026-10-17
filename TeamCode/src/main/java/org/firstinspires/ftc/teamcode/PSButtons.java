@@ -3,16 +3,9 @@ package org.firstinspires.ftc.teamcode;
 import com.arcrobotics.ftclib.gamepad.GamepadKeys;
 
 /**
- * Gamepad buttons referred to by their PlayStation names.
- * For sticks, bumpers, D-pad, etc. see {@link GamepadKeys.Button}.
- *
- * <p>Prefer binding actions in {@code RobotControls} with these aliases so the
- * driver-station cheat sheet reads in PlayStation names.
+ * Gamepad buttons referred to by their PlayStation names. For other buttons, please see {@link GamepadKeys.Button}
  */
-public final class PSButtons {
-
-    private PSButtons() {}
-
+public class PSButtons {
     public static final GamepadKeys.Button SQUARE = GamepadKeys.Button.X;
     public static final GamepadKeys.Button TRIANGLE = GamepadKeys.Button.Y;
     public static final GamepadKeys.Button CIRCLE = GamepadKeys.Button.B;
