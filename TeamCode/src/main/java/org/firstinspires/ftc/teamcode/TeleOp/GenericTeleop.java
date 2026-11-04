@@ -1,7 +1,7 @@
 package org.firstinspires.ftc.teamcode.TeleOp;
 
 import com.arcrobotics.ftclib.gamepad.GamepadEx;
-import com.arcrobotics.ftclib.gamepad.GamepadKeys;
+import com.arcrobotics.ftclib.gamepad.TriggerReader;
 import com.bylazar.telemetry.PanelsTelemetry;
 import com.bylazar.telemetry.TelemetryManager;
 import com.pedropathing.drivetrain.DrivePowers;
@@ -17,13 +17,19 @@ import org.firstinspires.ftc.teamcode.IntakeMotorComponent;
 import org.firstinspires.ftc.teamcode.Turret.TurretPIDComponent;
 import org.firstinspires.ftc.teamcode.AprilTag.AprilTagLocalization;
 import org.firstinspires.ftc.teamcode.AprilTag.TiltEstimateComponent;
-import org.firstinspires.ftc.teamcode.Turret.TurretPIDComponent;
 import org.firstinspires.ftc.teamcode.config.RobotConfig;
 import org.firstinspires.ftc.teamcode.config.RobotControls;
 import org.firstinspires.ftc.teamcode.config.RobotConfig.Vision.HiveCell;
 import org.firstinspires.ftc.teamcode.config.RobotConfig.Field.Goal;
 import org.firstinspires.ftc.teamcode.config.RobotConfig.Field.Start;
+import org.firstinspires.ftc.teamcode.controls.Binding;
+import org.firstinspires.ftc.teamcode.controls.ControlAction;
+import org.firstinspires.ftc.teamcode.controls.DriverProfile;
+import org.firstinspires.ftc.teamcode.controls.DriverProfiles;
 import org.firstinspires.ftc.teamcode.pedro.Constants;
+
+import java.util.EnumMap;
+import java.util.Map;
 
 /**
  * Shared TeleOp implementation. Subclasses pick one {@link Start} and one
@@ -37,20 +43,18 @@ import org.firstinspires.ftc.teamcode.pedro.Constants;
  * {@link #setActiveGoal(Goal)} / {@link #switchGoalForHiveTip()} from subclass
  * code or future game-logic hooks.
  *
- * <p>All tuning lives in {@link RobotConfig} and all
- * bindings live in {@link RobotControls}.
- *
- * <p>Simplified controls (see {@link RobotControls} to rebind, PlayStation names):
- * <ul>
- *   <li>Driver: left stick = drive/strafe, right stick X = turn,
- *       hold SLOW (RIGHT_BUMPER) for slow mode, press FIELD_CENTRIC (SQUARE) to toggle centricity.</li>
- *   <li>Operator: hold COLLECT (CROSS) to run intake + transfer + launchCap together,
- *       press AIM_AND_SPIN (CIRCLE) to toggle turret auto-aim + flywheel together,
- *       press FIRE (TRIANGLE) to kick one shot, hold UNCLOG (DPAD_DOWN) to reverse the feed.</li>
- * </ul>
+ * <p>All tuning lives in {@link RobotConfig}; driver bindings live in
+ * {@link org.firstinspires.ftc.teamcode.controls.DriverProfiles} — a named
+ * {@link DriverProfile} per driver, mapping the nine {@link ControlAction}s to
+ * any button/trigger on either pad. The active profile is chosen by
+ * {@link DriverProfiles#ACTIVE}, so swapping drivers never touches this class.
+ * {@link RobotControls} survives only for the tuning doubles it still owns
+ * (fire duration, collect-feeds-kicker, slow-mode toggle preference).
  *
  * <p>HOLD actions are level-driven (release auto-stops, nothing latches on);
- * only AIM_AND_SPIN (and SLOW when {@code SLOW_IS_TOGGLE}) latch.
+ * TOGGLE/PULSE actions latch or fire per style. Every action now drives real
+ * hardware: ramp, umbrella and switch-goal are wired to the servos and the
+ * live goal setters.
  */
 public abstract class GenericTeleop extends OpMode {
 
@@ -72,13 +76,23 @@ public abstract class GenericTeleop extends OpMode {
 
     private Pose startingPose;
 
-    // Latched state. Hold-to-run actions (collect/unclog) intentionally keep no
-    // latch — they are recomputed from the gamepad every loop.
+    // ---- control mapping (swappable per driver) ----
+    private DriverProfile profile;
+    private final Map<ControlAction, TriggerReader> triggerReaders =
+            new EnumMap<>(ControlAction.class);
+
+    // Per-action runtime state, indexed by ControlAction.ordinal().
+    private final boolean[] actionActive = new boolean[ControlAction.values().length];
+    private final boolean[] actionPressed = new boolean[ControlAction.values().length];
+
+    // Latched state. Hold-to-run actions intentionally keep no latch — they are
+    // recomputed from the gamepad every loop.
     private boolean fieldCentric;
     private boolean slowModeToggle = false;
-    private boolean aimingAndSpinning = false;
+    private boolean slowActive = false;
     private double firingUntilS = 0.0;
-    private boolean toggledUmbrella = false;
+    private boolean rampOpen = false;
+    private boolean umbrellaOpen = false;
 
     /** Dynamic target — switch mid-match as the HIVE tips / game evolves. */
     protected volatile Goal activeGoal;
@@ -173,6 +187,12 @@ public abstract class GenericTeleop extends OpMode {
         driver = new GamepadEx(gamepad1);
         operator = new GamepadEx(gamepad2);
 
+        profile = DriverProfiles.active();
+        rebuildTriggerReaders();
+        // Drive-mode starts latched to the configured default, so the first
+        // press flips away from it instead of silently forcing robot-centric.
+        actionActive[ControlAction.TOGGLE_DRIVE_MODE.ordinal()] = fieldCentric;
+
         turret.resetTurretEncoder();
     }
 
@@ -187,11 +207,16 @@ public abstract class GenericTeleop extends OpMode {
         driver.readButtons();
         operator.readButtons();
 
+        // Live profile swap support: if the dashboard changed
+        // DriverProfiles.ACTIVE, adopt the new profile (and its trigger
+        // readers) immediately.
+        updateActiveProfile();
+        readActions();
+
         updateShooterGoal();
-        handleUmbrella();
         handleDrive();
-        handleAimAndSpin();
-        handleFeed();
+        handleActions();
+        reportActionTelemetry();
         reportTiltTelemetry();
         reportTelemetry();
 
@@ -209,34 +234,251 @@ public abstract class GenericTeleop extends OpMode {
         }
     }
 
-    // ---- input helpers: every binding resolves through RobotControls.
-    // Gamepads are fixed by role: driver actions on gamepad1, operator on gamepad2.
+    // ---- control mapping plumbing ----
 
-    private boolean driverJustPressed(GamepadKeys.Button button) {
-        return driver.wasJustPressed(button);
+    /** Adopt a dashboard-changed profile for the very next loop tick. */
+    private void updateActiveProfile() {
+        if (profile == null) {
+            profile = DriverProfiles.active();
+            rebuildTriggerReaders();
+        } else if (DriverProfiles.active() != profile) {
+            profile = DriverProfiles.active();
+            rebuildTriggerReaders();
+        }
     }
 
-    private boolean driverHeld(GamepadKeys.Button button) {
-        return driver.getButton(button);
+    /** Trigger bindings need FTCLib {@link TriggerReader}s for edge detection. */
+    private void rebuildTriggerReaders() {
+        triggerReaders.clear();
+        if (profile == null) {
+            return;
+        }
+        for (Map.Entry<ControlAction, Binding> e : profile.all().entrySet()) {
+            Binding b = e.getValue();
+            if (b.trigger.isPresent()) {
+                triggerReaders.put(e.getKey(),
+                        new TriggerReader(b.pad == Binding.Pad.OPERATOR ? operator : driver,
+                                b.trigger.get()));
+            }
+        }
     }
 
-    private boolean operatorJustPressed(GamepadKeys.Button button) {
-        return operator.wasJustPressed(button);
+    /** Poll every bound action, filling per-action active/pressed state. */
+    private void readActions() {
+        // Advance trigger edge state first, so justPressed() below compares
+        // against this tick's fresh sample.
+        for (TriggerReader reader : triggerReaders.values()) {
+            reader.readValue();
+        }
+        java.util.Arrays.fill(actionPressed, false);
+        if (profile == null) {
+            return;
+        }
+        for (Map.Entry<ControlAction, Binding> e : profile.all().entrySet()) {
+            ControlAction action = e.getKey();
+            Binding b = e.getValue();
+            boolean pressed = justPressed(action);
+            boolean active = actionActive[action.ordinal()];
+
+            switch (b.style) {
+                case HOLD:
+                    active = held(action);
+                    break;
+                case TOGGLE:
+                    if (pressed) {
+                        active = !active;
+                    }
+                    break;
+                case PULSE:
+                    if (pressed) {
+                        active = true; // one tick only
+                    } else {
+                        active = false;
+                    }
+                    break;
+            }
+            actionActive[action.ordinal()] = active;
+            actionPressed[action.ordinal()] = pressed;
+        }
     }
 
-    private boolean operatorHeld(GamepadKeys.Button button) {
-        return operator.getButton(button);
+    /** Which pad a binding reads from. */
+    private GamepadEx pad(Binding binding) {
+        return binding.pad == Binding.Pad.OPERATOR ? operator : driver;
+    }
+
+    private boolean justPressed(ControlAction action) {
+        Binding b = profile.get(action);
+        if (b == null) {
+            return false;
+        }
+        if (b.trigger.isPresent()) {
+            TriggerReader reader = triggerReaders.get(action);
+            return reader != null && reader.wasJustPressed();
+        }
+        return pad(b).wasJustPressed(b.button.get());
+    }
+
+    private boolean held(ControlAction action) {
+        Binding b = profile.get(action);
+        if (b == null) {
+            return false;
+        }
+        if (b.trigger.isPresent()) {
+            TriggerReader reader = triggerReaders.get(action);
+            return reader != null && reader.isDown();
+        }
+        return pad(b).isDown(b.button.get()) || pad(b).getButton(b.button.get());
+    }
+
+    // ---- per-action dispatch (_robot behavior_, independent of keys) ----
+
+    private void handleActions() {
+        if (profile == null) {
+            return;
+        }
+
+        // The feed path is one subsystem: resolve it once per tick, with flush
+        // winning over intake (matching the old unclog behavior).
+        boolean flushing = actionActive[ControlAction.FLUSH_STORAGE.ordinal()];
+        boolean collecting = !flushing && actionActive[ControlAction.TOGGLE_INTAKE.ordinal()];
+        handleFeed(flushing, collecting);
+
+        for (ControlAction action : ControlAction.values()) {
+            boolean active = actionActive[action.ordinal()];
+            switch (action) {
+                case SHOOT:
+                    // Flush wins: reversing the path must not also feed a shot.
+                    if (active && !flushing) {
+                        // Momentary kick; the timer below auto-closes it.
+                        launchCap.open();
+                        firingUntilS = getRuntime()
+                                + Math.max(0.0, RobotControls.FIRE_KICK_SECONDS);
+                    }
+                    break;
+
+                case TOGGLE_AUTOAIM:
+                    if (active) {
+                        turret.aimToObject(poseX(), poseY(), poseHeading());
+                    } else {
+                        turret.stop();
+                    }
+                    break;
+
+                case TOGGLE_SHOOT_ANY_DISTANCE:
+                    if (active) {
+                        launcher.dynamicMotorPower(poseX(), poseY());
+                    } else {
+                        launcher.stop();
+                    }
+                    break;
+
+                case TOGGLE_RAMP:
+                    if (active != rampOpen) {
+                        rampOpen = active;
+                        if (active) {
+                            rampServo.open();
+                        } else {
+                            rampServo.close();
+                        }
+                    }
+                    break;
+
+                case TOGGLE_UMBRELLA:
+                    if (active != umbrellaOpen) {
+                        umbrellaOpen = active;
+                        if (active) {
+                            umbrellaServo.open();
+                        } else {
+                            umbrellaServo.close();
+                        }
+                    }
+                    break;
+
+                case SWITCH_GOAL:
+                    // PULSE/TOGGLE both work: act on the press edge only, so
+                    // holding the key retargets once.
+                    if (actionPressed[action.ordinal()]) {
+                        switchGoalForHiveTip();
+                    }
+                    break;
+
+                case TOGGLE_DRIVE_MODE:
+                    fieldCentric = active;
+                    break;
+
+                case TOGGLE_INTAKE:
+                case FLUSH_STORAGE:
+                    // handled above by handleFeed(), once per tick
+                    break;
+
+                case SLOW_MODE:
+                    // consumed by handleDrive()
+                    break;
+            }
+        }
+
+        // Fire timer: auto-close the launchCap when the pulse laps.
+        if (firingUntilS != 0.0 && getRuntime() >= firingUntilS) {
+            launchCap.close();
+            firingUntilS = 0.0;
+        }
+    }
+
+    /** Intake + transfer + launchCap: one feed path, flush has priority. */
+    private void handleFeed(boolean flushing, boolean collecting) {
+        if (flushing) {
+            // Unclog wins over everything: reverse the path, force launchCap shut.
+            intake.reverseMotor();
+            transfer.runMotorAt(RobotConfig.Transfer.REVERSE_POWER);
+            launchCap.close();
+            firingUntilS = 0.0;
+        } else if (collecting) {
+            intake.startMotor();
+            transfer.runMotorAt(RobotConfig.Transfer.FORWARD_POWER);
+            if (RobotControls.COLLECT_OPENS_KICKER) {
+                launchCap.open();
+            }
+            firingUntilS = 0.0;
+        } else {
+            intake.stopMotor();
+            transfer.stopMotor();
+            if (firingUntilS == 0.0) {
+                // Safe default: launchCap stays shut when idle so staged balls
+                // can't dribble into the wheel.
+                launchCap.close();
+            }
+        }
+    }
+
+    private void updateShooterGoal() {
+        // Push the (possibly re-switched / dashboard-retuned) goal every loop
+        // so turret + shooter track it with no restart.
+        if (isTilt()) {
+            switchGoalForHiveTip();
+        }
+        if (activeGoal != null) {
+            launcher.setGoal(activeGoal);
+            turret.setGoal(activeGoal);
+        }
     }
 
     // ---- drive ----
 
     private void handleDrive() {
-        if (RobotControls.SLOW_IS_TOGGLE && driverJustPressed(RobotControls.SLOW_BUTTON)) {
-            slowModeToggle = !slowModeToggle;
+        // Slow mode: re-honors the legacy RobotControls.SLOW_IS_TOGGLE toggle
+        // preference even under the new profile system.
+        boolean slow;
+        if (RobotControls.SLOW_IS_TOGGLE) {
+            if (actionActive[ControlAction.SLOW_MODE.ordinal()]
+                    && actionPressed[ControlAction.SLOW_MODE.ordinal()]) {
+                slowModeToggle = !slowModeToggle;
+            }
+            slow = slowModeToggle;
+        } else {
+            slow = actionActive[ControlAction.SLOW_MODE.ordinal()];
         }
-        boolean slow = RobotControls.SLOW_IS_TOGGLE
-                ? slowModeToggle
-                : driverHeld(RobotControls.SLOW_BUTTON);
+        slowActive = slow;
         double scale = slow ? RobotConfig.Drive.SLOW_MODE_MULTIPLIER : 1.0;
 
         double forward = driver.getLeftY() * scale;
@@ -251,101 +493,8 @@ public abstract class GenericTeleop extends OpMode {
             follower.manual(forward, strafe, turn);
         }
 
-        if (driverJustPressed(RobotControls.FIELD_CENTRIC_BUTTON)) {
-            fieldCentric = !fieldCentric;
-        }
-
         telemetry.addData("Slow mode", slow);
         telemetry.addData("Field centric", fieldCentric);
-    }
-
-    // ---- turret + flywheel (linked) ----
-
-    private void handleAimAndSpin() {
-        if (operatorJustPressed(RobotControls.AIM_AND_SPIN_BUTTON)) {
-            aimingAndSpinning = !aimingAndSpinning;
-            if (!aimingAndSpinning) {
-                launcher.stop();
-                turret.stop();
-            }
-        }
-        if (aimingAndSpinning) {
-            turret.aimToObject(poseX(), poseY(), poseHeading());
-            launcher.dynamicMotorPower(poseX(), poseY());
-        }
-        telemetry.addData("Aiming+Spinning", aimingAndSpinning);
-        telemetry.addData("Shooter RPM (target)", launcher.getRPM());
-        telemetry.addData("Turret deg", turret.getCurrentAngle());
-    }
-
-    // ---- intake / transfer / launchCap (one feed path) ----
-
-    private void handleFeed() {
-        boolean unclog = operatorHeld(RobotControls.UNCLOG_BUTTON);
-        boolean collect = !unclog && operatorHeld(RobotControls.COLLECT_BUTTON);
-        if (operatorHeld(RobotControls.RAMP_BUTTON)) {
-            rampServo.open();
-        } else {
-            rampServo.close();
-        }
-        if (unclog) {
-            // Unclog wins over everything: reverse the path, force launchCap shut.
-            intake.reverseMotor();
-            transfer.runMotorAt(RobotConfig.Transfer.REVERSE_POWER);
-            launchCap.close();
-            firingUntilS = 0.0;
-        } else if (collect) {
-            intake.startMotor();
-            transfer.runMotorAt(RobotConfig.Transfer.FORWARD_POWER);
-            if (RobotControls.COLLECT_OPENS_KICKER) {
-                launchCap.open();
-            }
-            firingUntilS = 0.0;
-        } else {
-            intake.stopMotor();
-            transfer.stopMotor();
-
-            if (operatorJustPressed(RobotControls.FIRE_BUTTON)) {
-                launchCap.open();
-                firingUntilS = getRuntime() + Math.max(0.0, RobotControls.FIRE_KICK_SECONDS);
-            } else if (firingUntilS != 0.0) {
-                if (getRuntime() >= firingUntilS) {
-                    launchCap.close();
-                    firingUntilS = 0.0;
-                }
-            } else {
-                // Safe default: launchCap stays shut when idle (e.g. after COLLECT
-                // is released) so staged balls can't dribble into the wheel.
-                launchCap.close();
-            }
-        }
-
-        telemetry.addData("Collecting", collect);
-        telemetry.addData("Unclogging", unclog);
-        telemetry.addData("launchCap open", launchCap.isOpen());
-    }
-
-    private void updateShooterGoal(){
-        // Push the (possibly re-switched / dashboard-retuned) goal every loop
-        // so turret + shooter track it with no restart.
-        if (isTilt()){
-            switchGoalForHiveTip();
-        }
-        if (activeGoal != null) {
-            launcher.setGoal(activeGoal);
-            turret.setGoal(activeGoal);
-        }
-    }
-
-    private void handleUmbrella(){
-        if (operatorJustPressed(RobotControls.UMBRELLA_BUTTON) && !toggledUmbrella){
-            umbrellaServo.open();
-            toggledUmbrella = !toggledUmbrella;
-        }
-        else if (operatorJustPressed(RobotControls.UMBRELLA_BUTTON) && toggledUmbrella){
-            umbrellaServo.close();
-            toggledUmbrella = !toggledUmbrella;
-        }
     }
 
     // ---- telemetry ----
@@ -380,11 +529,12 @@ public abstract class GenericTeleop extends OpMode {
     }
 
     private void reportTelemetry() {
-        telemetry.addData("Controls",
-                "Slow=%s Field=%s | Collect=%s AimSpin=%s Fire=%s Unclog=%s",
-                RobotControls.SLOW_BUTTON, RobotControls.FIELD_CENTRIC_BUTTON,
-                RobotControls.COLLECT_BUTTON, RobotControls.AIM_AND_SPIN_BUTTON,
-                RobotControls.FIRE_BUTTON, RobotControls.UNCLOG_BUTTON);
+        telemetry.addData("Control profile (Panels: DriverProfiles.ACTIVE)", profile == null ? "?" : profile.name);
+        if (profile != null) {
+            for (Map.Entry<ControlAction, Binding> e : profile.all().entrySet()) {
+                telemetry.addData("  " + e.getKey().label, e.getValue().toString());
+            }
+        }
         telemetry.addData("Start", "%s (%.1f, %.1f, %.0f deg)",
                 getStart(), getStart().x(), getStart().y(),
                 getStart().headingDeg());
@@ -395,6 +545,59 @@ public abstract class GenericTeleop extends OpMode {
         }
         panels.debug("position", follower.pose());
         panels.debug("velocity", follower.velocity());
+    }
+
+    /** Status of every bound action this tick (unbound actions are skipped). */
+    private void reportActionTelemetry() {
+        if (profile == null) {
+            return;
+        }
+        for (ControlAction action : ControlAction.values()) {
+            if (profile.get(action) == null) {
+                continue; // unbound — don't spam telemetry with dead rows
+            }
+            boolean active = actionActive[action.ordinal()];
+            String status;
+            switch (action) {
+                case SHOOT:
+                    status = active || firingUntilS != 0.0 ? "FIRING" : "ready";
+                    break;
+                case TOGGLE_AUTOAIM:
+                    status = active ? "ON" : "off";
+                    break;
+                case TOGGLE_SHOOT_ANY_DISTANCE:
+                    status = active ? "ON" : "off";
+                    break;
+                case FLUSH_STORAGE:
+                    status = active ? "FLUSHING" : "idle";
+                    break;
+                case TOGGLE_INTAKE:
+                    status = active ? "ON" : "off";
+                    break;
+                case TOGGLE_DRIVE_MODE:
+                    status = fieldCentric ? "FIELD centric" : "robot centric";
+                    break;
+                case TOGGLE_RAMP:
+                    status = rampOpen ? "OPEN" : "closed";
+                    break;
+                case TOGGLE_UMBRELLA:
+                    status = umbrellaOpen ? "OPEN" : "closed";
+                    break;
+                case SWITCH_GOAL:
+                    status = "target " + getTargetCell();
+                    break;
+                case SLOW_MODE:
+                    status = slowActive ? "ON" : "off";
+                    break;
+                default:
+                    status = active ? "ON" : "off";
+                    break;
+            }
+            telemetry.addData("Action: " + action.label, status);
+        }
+        telemetry.addData("Shooter RPM (target)", launcher.getRPM());
+        telemetry.addData("Turret deg", turret.getCurrentAngle());
+        telemetry.addData("launchCap open", launchCap.isOpen());
     }
 
     private double poseX() {
@@ -409,8 +612,11 @@ public abstract class GenericTeleop extends OpMode {
         return follower.pose().heading();
     }
 
-    public boolean isTilt(){
+    public boolean isTilt() {
         HiveCell target = getTargetCell();
+        if (aprilTags == null) {
+            return false; // vision failed at init — never auto-flip the goal
+        }
         double pitch = aprilTags.getClusterPitch(target);
         boolean visible = pitch != AprilTagLocalization.UNKNOWN_PITCH;
         return visible && tiltEstimator.isTilted(pitch);
