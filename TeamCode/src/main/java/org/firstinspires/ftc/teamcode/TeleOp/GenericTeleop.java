@@ -214,8 +214,8 @@ public abstract class GenericTeleop extends OpMode {
         readActions();
 
         updateShooterGoal();
-        handleDrive();
         handleActions();
+        handleDrive();
         reportActionTelemetry();
         reportTiltTelemetry();
         reportTelemetry();
@@ -299,6 +299,17 @@ public abstract class GenericTeleop extends OpMode {
             }
             actionActive[action.ordinal()] = active;
             actionPressed[action.ordinal()] = pressed;
+        }
+
+        // Universal drive-mode key: polled outside the profile map so it works
+        // on every profile — including driver J's, which has no drive-mode
+        // binding at all — and alongside A's CIRCLE / Y's D-pad-right.
+        Binding universal = DriverProfiles.UNIVERSAL_DRIVE_MODE;
+        if (universal.button.isPresent()
+                && pad(universal).wasJustPressed(universal.button.get())) {
+            int driveMode = ControlAction.TOGGLE_DRIVE_MODE.ordinal();
+            actionActive[driveMode] = !actionActive[driveMode];
+            actionPressed[driveMode] = true;
         }
     }
 
@@ -535,6 +546,8 @@ public abstract class GenericTeleop extends OpMode {
                 telemetry.addData("  " + e.getKey().label, e.getValue().toString());
             }
         }
+        telemetry.addData("Universal drive mode",
+                "%s (always live)", DriverProfiles.UNIVERSAL_DRIVE_MODE);
         telemetry.addData("Start", "%s (%.1f, %.1f, %.0f deg)",
                 getStart(), getStart().x(), getStart().y(),
                 getStart().headingDeg());

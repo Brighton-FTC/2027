@@ -35,6 +35,22 @@ public final class DriverProfiles {
     public static String ACTIVE = "A";
 
     /**
+     * Universal drive-mode key, live on EVERY profile no matter what
+     * {@link #ACTIVE} says — press to flip field-centric / robot-centric.
+     *
+     * <p>START (OPTIONS) is free: between them A, Y and J already claim every
+     * face button, both bumpers, both triggers, both stick clicks and (for Y)
+     * the whole D-pad, so this is the one deliberate key nobody loses.
+     *
+     * <p>It lives outside the profile maps on purpose — a {@link DriverProfile}
+     * holds one key per action, so binding it inside a profile would overwrite
+     * driver A's CIRCLE / driver Y's D-pad-right, and driver J (who submitted
+     * no drive-mode key at all) would still have nothing. {@code GenericTeleop}
+     * polls this on top of the active profile instead.
+     */
+    public static final Binding UNIVERSAL_DRIVE_MODE = Binding.button(PSButtons.OPTIONS);
+
+    /**
      * Driver A's layout, exactly as submitted:
      * shoot L2, auto-aim L1, shoot-any-distance R1, ramp L3,
      * intake R2, flush triangle, umbrella R3, drive mode circle,
