@@ -337,7 +337,9 @@ public abstract class GenericTeleop extends OpMode {
             TriggerReader reader = triggerReaders.get(action);
             return reader != null && reader.isDown();
         }
-        return pad(b).isDown(b.button.get()) || pad(b).getButton(b.button.get());
+        // GamepadEx.isDown() is the FTCLib hold-check (edge state comes from
+        // readButtons()); getButton() would just re-read the same field.
+        return pad(b).isDown(b.button.get());
     }
 
     // ---- per-action dispatch (_robot behavior_, independent of keys) ----
