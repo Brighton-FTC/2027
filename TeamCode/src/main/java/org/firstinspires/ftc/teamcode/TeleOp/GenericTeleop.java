@@ -1,5 +1,7 @@
 package org.firstinspires.ftc.teamcode.TeleOp;
 
+import static com.pedropathing.api.Paths.line;
+
 import com.arcrobotics.ftclib.gamepad.GamepadEx;
 import com.arcrobotics.ftclib.gamepad.TriggerReader;
 import com.bylazar.telemetry.PanelsTelemetry;
@@ -7,11 +9,16 @@ import com.bylazar.telemetry.TelemetryManager;
 import com.pedropathing.drivetrain.DrivePowers;
 import com.pedropathing.follower.Follower;
 import com.pedropathing.follower.ManualDrive;
+import com.pedropathing.ivy.Command;
 import com.pedropathing.math.Pose;
+import com.pedropathing.math.Vector2D;
+import com.pedropathing.paths.Path;
 import com.qualcomm.robotcore.eventloop.opmode.OpMode;
 
 import org.firstinspires.ftc.teamcode.FlyWheel.DynamicAngleComponent;
 import org.firstinspires.ftc.teamcode.FlyWheel.FlyWheelMotorComponent;
+import org.firstinspires.ftc.teamcode.OpenCV.OpenCVComponent;
+import org.firstinspires.ftc.teamcode.OpenCV.PoseCreatorComponent;
 import org.firstinspires.ftc.teamcode.Servo.ServoComponent;
 import org.firstinspires.ftc.teamcode.IntakeMotorComponent;
 import org.firstinspires.ftc.teamcode.Turret.TurretPIDComponent;
@@ -29,6 +36,7 @@ import org.firstinspires.ftc.teamcode.controls.DriverProfiles;
 import org.firstinspires.ftc.teamcode.pedro.Constants;
 
 import java.util.EnumMap;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -101,6 +109,17 @@ public abstract class GenericTeleop extends OpMode {
 
     /** Goal aimed at init; becomes {@link #activeGoal} (switchable later). */
     protected abstract Goal getInitialGoal();
+
+    protected abstract OpenCVComponent.Target getColour();
+    private PoseCreatorComponent pollenLocator;
+
+    // ---- pollen pathing (OpenCV) ----
+    /** Below this travel the "path" is a point — nothing to follow. */
+    private static final double MIN_POLLEN_PATH_IN = 0.5;
+    /** True when the last pollen path attempt ended without following. */
+    private boolean pollenPathBlocked;
+    /** Why the last pollen path attempt followed or not (telemetry). */
+    private String pollenPathStatus = "never run";
 
     /** Current goal XY/height, always read live from {@link RobotConfig} tuning. */
     protected Goal getActiveGoal() {
@@ -192,6 +211,82 @@ public abstract class GenericTeleop extends OpMode {
         actionActive[ControlAction.TOGGLE_DRIVE_MODE.ordinal()] = fieldCentric;
 
         turret.resetTurretEncoder();
+
+        pollenLocator = new PoseCreatorComponent(getColour(), follower.pose());
+    }
+
+    /**
+     * Command that drives a Pedro straight line from the robot's pose at
+     * start to the selected pollen (x, y), arriving facing {@code heading} —
+     * feed it {@link PoseCreatorComponent#createPose()} output.
+     *
+     * <p>The path is built when the command starts (fresh pose, fresh vision
+     * snapshot) and then checked against every OTHER detected object: if any
+     * lies within {@link RobotConfig.Field#POLLEN_PATH_CLEARANCE_IN} of the
+     * line, the path is rejected and the command ends without driving.
+     *
+     * <p>{@code follower.update()} already runs in {@link #loop()}; note that
+     * driver manual input ({@link #handleDrive()}) cancels the follow — gate
+     * it when wiring this up.
+     */
+    public Command pathToPollen(double x, double y, double heading) {
+        return Command.build()
+                .setStart(() -> followPollenPath(x, y, heading))
+                .setDone(() -> pollenPathBlocked
+                        || !follower.isBusy()
+                        || !follower.following())
+                .requiring(follower);
+    }
+
+    /** Build, collision-check and (when clear) follow the line to a pollen. */
+    private void followPollenPath(double x, double y, double heading) {
+        pollenPathBlocked = true;
+        pollenPathStatus = "no usable target";
+
+        Pose start = follower.pose();
+        Pose end = new Pose(x, y, heading);
+        if (Double.isNaN(end.x()) || Double.isNaN(end.y())) {
+            return;
+        }
+        double travel = start.distance(end);
+        if (travel < MIN_POLLEN_PATH_IN) {
+            pollenPathStatus = String.format("already at target (%.1f in)", travel);
+            return;
+        }
+        // Keep the robot's heading at t=0 (no snap) and rotate to the
+        // approach heading by the end of the line.
+        Path path = line(start.toVector2D(), end.toVector2D())
+                .linear(start.heading(), end.heading());
+        if (pollenPathCollides(start, end)) {
+            pollenPathStatus = String.format(
+                    "blocked: object within %.1f in of path",
+                    RobotConfig.Field.POLLEN_PATH_CLEARANCE_IN);
+            return;
+        }
+        pollenPathBlocked = false;
+        pollenPathStatus = String.format("following (%.1f in)", travel);
+        follower.follow(path);
+    }
+
+    /**
+     * True when any detected object other than the target sits within
+     * {@link RobotConfig.Field#POLLEN_PATH_CLEARANCE_IN} of the straight
+     * pollen path. Point-to-segment distance — exact for a Line path.
+     */
+    private boolean pollenPathCollides(Pose start, Pose end) {
+        Vector2D a = start.toVector2D();
+        Vector2D seg = end.toVector2D().minus(a);
+        double lenSq = seg.magnitudeSquared();
+        for (Vector2D obstacle : pollenLocator.getObstaclePositions()) {
+            double t = lenSq == 0.0
+                    ? 0.0 : obstacle.minus(a).dot(seg) / lenSq;
+            t = Math.max(0.0, Math.min(1.0, t));
+            if (obstacle.minus(a.plus(seg.times(t))).magnitude()
+                    < RobotConfig.Field.POLLEN_PATH_CLEARANCE_IN) {
+                return true;
+            }
+        }
+        return false;
     }
 
     @Override
@@ -551,6 +646,8 @@ public abstract class GenericTeleop extends OpMode {
                     activeGoal, activeGoal.x(), activeGoal.y(),
                     activeGoal.height(), activeGoal.cell());
         }
+        telemetry.addData("Pollen path", pollenPathStatus);
+        panels.debug("pollen/path", pollenPathStatus);
         panels.debug("position", follower.pose());
         panels.debug("velocity", follower.velocity());
     }

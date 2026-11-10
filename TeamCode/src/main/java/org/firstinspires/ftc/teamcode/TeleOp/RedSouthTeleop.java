@@ -2,6 +2,7 @@ package org.firstinspires.ftc.teamcode.TeleOp;
 
 import com.qualcomm.robotcore.eventloop.opmode.TeleOp;
 
+import org.firstinspires.ftc.teamcode.OpenCV.OpenCVComponent;
 import org.firstinspires.ftc.teamcode.config.RobotConfig.Field.Goal;
 import org.firstinspires.ftc.teamcode.config.RobotConfig.Field.Start;
 
@@ -23,4 +24,7 @@ public class RedSouthTeleop extends GenericTeleop {
     protected Goal getInitialGoal() {
         return Goal.RED_AUDIENCE;
     }
+
+    @Override
+    protected OpenCVComponent.Target getColour(){return OpenCVComponent.Target.RED;}
 }

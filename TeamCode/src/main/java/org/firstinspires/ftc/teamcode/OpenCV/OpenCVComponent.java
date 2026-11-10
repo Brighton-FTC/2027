@@ -46,20 +46,16 @@ public class OpenCVComponent {
     /** Max per-object lines in telemetry; remainder collapses to "+N more". */
     private static final int MAX_TELEMETRY_OBJECTS = 4;
 
-    private volatile Target target = Target.BLUE;
+    private volatile Target target;
     private volatile boolean streaming = false;
     private volatile int openErrorCode = 0;
 
-    /** Default webcam from config. */
-    public OpenCVComponent(HardwareMap hardwareMap, Telemetry telemetry) {
-        this(hardwareMap, RobotConfig.Hardware.WEBCAM_NAME, telemetry);
-    }
-
-    public OpenCVComponent(HardwareMap hardwareMap, String webcamId, Telemetry telemetry) {
+    public OpenCVComponent(HardwareMap hardwareMap, String webcamId, Telemetry telemetry, Target target) {
         Objects.requireNonNull(hardwareMap, "hardwareMap");
         Objects.requireNonNull(webcamId, "webcamId");
         Objects.requireNonNull(telemetry, "telemetry");
         this.telemetry = telemetry;
+        this.target = target;
 
         pipelines.put(Target.RED, new RedSamplePipeline());
         pipelines.put(Target.BLUE, new BlueSamplePipeline());

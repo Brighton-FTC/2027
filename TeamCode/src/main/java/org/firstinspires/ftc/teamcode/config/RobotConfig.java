@@ -56,6 +56,12 @@ public final class RobotConfig {
         /** Shared physical goal height for ALL 4 CELLs (same HIVE pivots, 43.95in axis). */
         public static double GOAL_HEIGHT = 42.0;
 
+        /**
+         * Keep-out radius (in) around every object: a pollen path may not
+         * come closer than this to any detected object other than its target.
+         */
+        public static double POLLEN_PATH_CLEARANCE_IN = 9.0;
+
         // ---- goal centres (tunable) ----
         public static double RED_SCORING_X = 60.0;
         public static double RED_SCORING_Y = 81.4;
