@@ -66,7 +66,6 @@ public abstract class GenericTeleop extends OpMode {
 
     private TurretPIDComponent turret;
     private DynamicAngleComponent launcher;
-    private FlyWheelMotorComponent transfer;
     private ServoComponent launchCap;
     private ServoComponent rampServo;
     private ServoComponent umbrellaServo;
@@ -170,7 +169,6 @@ public abstract class GenericTeleop extends OpMode {
                 RobotConfig.Hardware.FLYWHEEL_MOTOR,
                 activeGoal.x(), activeGoal.y(),
                 activeGoal.height());
-        transfer = new FlyWheelMotorComponent(hardwareMap, RobotConfig.Hardware.TRANSFER_MOTOR);
         launchCap = new ServoComponent(hardwareMap, RobotConfig.Hardware.LAUNCH_CAP_SERVO, RobotConfig.ServoPose.LAUNCH_CAP_OPEN_POSITION, RobotConfig.ServoPose.LAUNCH_CAP_CLOSED_POSITION, RobotConfig.ServoPose.LAUNCH_CAP_CLOSED_POSITION);
         intake = new IntakeMotorComponent(hardwareMap, RobotConfig.Hardware.INTAKE_MOTOR);
         rampServo = new ServoComponent(hardwareMap, RobotConfig.Hardware.RAMP_SERVO, RobotConfig.ServoPose.RAMP_OPEN_POSITION, RobotConfig.ServoPose.RAMP_CLOSED_POSITION, RobotConfig.ServoPose.RAMP_CLOSED_POSITION);
@@ -435,25 +433,20 @@ public abstract class GenericTeleop extends OpMode {
             firingUntilS = 0.0;
         }
     }
-
-    /** Intake + transfer + launchCap: one feed path, flush has priority. */
     private void handleFeed(boolean flushing, boolean collecting) {
         if (flushing) {
             // Unclog wins over everything: reverse the path, force launchCap shut.
             intake.reverseMotor();
-            transfer.runMotorAt(RobotConfig.Transfer.REVERSE_POWER);
             launchCap.close();
             firingUntilS = 0.0;
         } else if (collecting) {
             intake.startMotor();
-            transfer.runMotorAt(RobotConfig.Transfer.FORWARD_POWER);
             if (RobotControls.COLLECT_OPENS_KICKER) {
                 launchCap.open();
             }
             firingUntilS = 0.0;
         } else {
             intake.stopMotor();
-            transfer.stopMotor();
             if (firingUntilS == 0.0) {
                 // Safe default: launchCap stays shut when idle so staged balls
                 // can't dribble into the wheel.
