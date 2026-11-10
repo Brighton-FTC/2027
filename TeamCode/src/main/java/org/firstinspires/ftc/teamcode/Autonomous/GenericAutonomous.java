@@ -423,6 +423,11 @@ public abstract class GenericAutonomous extends OpMode {
         return ServoCommands.close(umbrellaServo);
     }
 
+    protected void switchGoal(){
+        goal = goal.otherEndOfHive();
+        turret.setGoal(goal);
+    }
+
     // ------------------------------------------------------------------
     // Helpers
     // ------------------------------------------------------------------
