@@ -30,8 +30,8 @@ public class TurretPIDComponent {
     private final PIDFController controller = new PIDFController(0, 0, 0, 0);
     private final Telemetry telemetry;
 
-    private final double goalX;
-    private final double goalY;
+    private double goalX;
+    private double goalY;
     private final double degreesPerTick;
 
     // Reference-style wrap-around tracking: turretGlobalAngle accumulates the
@@ -133,6 +133,17 @@ public class TurretPIDComponent {
 
     public double getPIDSetPoint() {
         return controller.getSetPoint();
+    }
+
+    /** Retargets the turret to a new HIVE CELL (reads dashboard-tuned XY). */
+    public void setGoal(RobotConfig.Field.Goal goal) {
+        setGoal(goal.x(), goal.y());
+    }
+
+    /** Retargets the turret to an explicit field goal, in inches. */
+    public void setGoal(double goalX, double goalY) {
+        this.goalX = goalX;
+        this.goalY = goalY;
     }
 
     // ---- internals ----
