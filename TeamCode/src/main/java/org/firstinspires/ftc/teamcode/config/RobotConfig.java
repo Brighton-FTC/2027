@@ -306,10 +306,21 @@ public final class RobotConfig {
         public static HiveCell RED_TARGET_CELL = HiveCell.RED_SCORING;
         public static HiveCell BLUE_TARGET_CELL = HiveCell.BLUE_SCORING;
 
-        /** Calibrated upright pitch (deg) for your camera mount. Tune per robot. */
-        public static double NORMAL_PITCH_DEG = 0.0;
-        /** Drop below normal that counts as tilted (deg). */
-        public static double TILT_THRESHOLD_DEG = 3.0;
+        // ---- goal-marker detection (GoalTiltPipeline, feeds the tilt estimator) ----
+
+        /** Goal-marker HSV bounds (OpenCV H is 0-179). Tune on the field. */
+        public static double GOAL_HUE_MIN = 20;
+        public static double GOAL_HUE_MAX = 30;
+        public static double GOAL_SAT_MIN = 100;
+        public static double GOAL_SAT_MAX = 255;
+        public static double GOAL_VAL_MIN = 100;
+        public static double GOAL_VAL_MAX = 255;
+        /** Goal-marker width (in) for the distance math. Measure the marker, not the CELL. */
+        public static double GOAL_KNOWN_WIDTH_IN = 6.0;
+        /** Goal-marker height above the ground (in) when the HIVE is upright. Calibrate on the field. */
+        public static double NORMAL_GOAL_HEIGHT_IN = 42.0;
+        /** Drop below the normal height that counts as tipped (in). */
+        public static double TILT_HEIGHT_THRESHOLD_IN = 3.0;
 
         /** EasyOpenCV sample detector: contour below this (px^2) is ignored as noise. */
         public static double OPENCV_MIN_AREA_PX = 500.0;

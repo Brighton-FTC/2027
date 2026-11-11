@@ -5,6 +5,7 @@ import com.qualcomm.robotcore.hardware.HardwareMap;
 import org.firstinspires.ftc.robotcore.external.Telemetry;
 import org.firstinspires.ftc.robotcore.external.hardware.camera.WebcamName;
 import org.firstinspires.ftc.teamcode.config.RobotConfig;
+import org.firstinspires.ftc.teamcode.Tilt.TiltEstimateComponent;
 import org.openftc.easyopencv.OpenCvCamera;
 import org.openftc.easyopencv.OpenCvCameraFactory;
 import org.openftc.easyopencv.OpenCvCameraRotation;
@@ -36,7 +37,9 @@ public class OpenCVComponent {
     public enum Target {
         RED,
         BLUE,
-        YELLOW
+        YELLOW,
+        /** Goal (HIVE CELL) marker — feeds the tilt estimator, not pathing. */
+        GOAL
     }
 
     private final Telemetry telemetry;
@@ -60,6 +63,7 @@ public class OpenCVComponent {
         pipelines.put(Target.RED, new RedSamplePipeline());
         pipelines.put(Target.BLUE, new BlueSamplePipeline());
         pipelines.put(Target.YELLOW, new YellowSamplePipeline());
+        pipelines.put(Target.GOAL, new GoalTiltPipeline());
 
         int cameraMonitorViewId = hardwareMap.appContext.getResources()
                 .getIdentifier("cameraMonitorViewId", "id",
@@ -156,6 +160,25 @@ public class OpenCVComponent {
     public SamplePipeline.Detection getBestDetection() {
         List<SamplePipeline.Detection> dets = getDetections();
         return dets.isEmpty() ? null : dets.get(0);
+    }
+
+    /**
+     * Height above the ground (in) of the goal marker seen by the GOAL
+     * pipeline — the tilt estimator's input ({@link
+     * org.firstinspires.ftc.teamcode.Tilt.TiltEstimateComponent}). Returns
+     * {@link TiltEstimateComponent#UNKNOWN_HEIGHT} when the GOAL pipeline is
+     * not active, nothing is visible, or the marker's distance is not
+     * computable (no known width / degenerate box).
+     */
+    public double getGoalHeightIn() {
+        if (target != Target.GOAL) {
+            return TiltEstimateComponent.UNKNOWN_HEIGHT;
+        }
+        SamplePipeline.Detection d = getBestDetection();
+        if (d == null || Double.isNaN(d.heightIn)) {
+            return TiltEstimateComponent.UNKNOWN_HEIGHT;
+        }
+        return d.heightIn;
     }
 
     /**

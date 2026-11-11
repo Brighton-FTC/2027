@@ -22,8 +22,7 @@ import org.firstinspires.ftc.teamcode.OpenCV.PoseCreatorComponent;
 import org.firstinspires.ftc.teamcode.Servo.ServoComponent;
 import org.firstinspires.ftc.teamcode.IntakeMotorComponent;
 import org.firstinspires.ftc.teamcode.Turret.TurretPIDComponent;
-import org.firstinspires.ftc.teamcode.AprilTag.AprilTagLocalization;
-import org.firstinspires.ftc.teamcode.AprilTag.TiltEstimateComponent;
+import org.firstinspires.ftc.teamcode.Tilt.TiltEstimateComponent;
 import org.firstinspires.ftc.teamcode.config.RobotConfig;
 import org.firstinspires.ftc.teamcode.config.RobotControls;
 import org.firstinspires.ftc.teamcode.config.RobotConfig.Vision.HiveCell;
@@ -78,8 +77,10 @@ public abstract class GenericTeleop extends OpMode {
     private ServoComponent rampServo;
     private ServoComponent umbrellaServo;
     private IntakeMotorComponent intake;
-    private AprilTagLocalization aprilTags;
     private TiltEstimateComponent tiltEstimator;
+
+    /** The one webcam: pollen pipeline for pathing, GOAL pipeline for tilt. */
+    private OpenCVComponent vision;
 
     private Pose startingPose;
 
@@ -149,14 +150,14 @@ public abstract class GenericTeleop extends OpMode {
         return activeGoal != null ? activeGoal.cell() : getInitialGoal().cell();
     }
 
-    /** Calibrated upright pitch (shared tuning, override only if needed per alliance). */
-    protected double getNormalPitch() {
-        return RobotConfig.Vision.NORMAL_PITCH_DEG;
+    /** Goal-marker height (in) with the HIVE upright (shared tuning, override per alliance if needed). */
+    protected double getNormalGoalHeight() {
+        return RobotConfig.Vision.NORMAL_GOAL_HEIGHT_IN;
     }
 
-    /** Tilt threshold in deg (shared tuning, override only if needed per alliance). */
-    protected double getTiltThreshold() {
-        return RobotConfig.Vision.TILT_THRESHOLD_DEG;
+    /** Tilt threshold in inches of height drop (shared tuning, override per alliance if needed). */
+    protected double getTiltThresholdIn() {
+        return RobotConfig.Vision.TILT_HEIGHT_THRESHOLD_IN;
     }
 
     /** Where localization is seeded at init — built live from {@link #getStart()} so dashboard edits apply. */
@@ -193,13 +194,14 @@ public abstract class GenericTeleop extends OpMode {
         rampServo = new ServoComponent(hardwareMap, RobotConfig.Hardware.RAMP_SERVO, RobotConfig.ServoPose.RAMP_OPEN_POSITION, RobotConfig.ServoPose.RAMP_CLOSED_POSITION, RobotConfig.ServoPose.RAMP_CLOSED_POSITION);
         umbrellaServo = new ServoComponent(hardwareMap, RobotConfig.Hardware.UMBRELLA_SERVO, RobotConfig.ServoPose.UMBRELLA_OPEN_POSITION, RobotConfig.ServoPose.UMBRELLA_CLOSED_POSITION, RobotConfig.ServoPose.UMBRELLA_CLOSED_POSITION);
 
-        try {
-            aprilTags = new AprilTagLocalization(hardwareMap, telemetry);
-        } catch (Exception e) {
-            aprilTags = null;
-            telemetry.addData("AprilTag vision", "init failed: %s", e.getMessage());
-        }
-        tiltEstimator = new TiltEstimateComponent(getNormalPitch(), getTiltThreshold());
+        // ONE camera stack (EasyOpenCV): the alliance colour pipeline for
+        // pollen pathing, the GOAL marker pipeline for the tilt estimator.
+        // The AprilTag VisionPortal this used to run alongside is gone —
+        // both can't own the same webcam anyway.
+        vision = new OpenCVComponent(hardwareMap, RobotConfig.Hardware.WEBCAM_NAME,
+                telemetry, getColour());
+        vision.startStreaming();
+        tiltEstimator = new TiltEstimateComponent(getNormalGoalHeight(), getTiltThresholdIn());
 
         driver = new GamepadEx(gamepad1);
         operator = new GamepadEx(gamepad2);
@@ -212,7 +214,7 @@ public abstract class GenericTeleop extends OpMode {
 
         turret.resetTurretEncoder();
 
-        pollenLocator = new PoseCreatorComponent(getColour(), follower.pose());
+        pollenLocator = new PoseCreatorComponent(vision, follower.pose());
     }
 
     /**
@@ -305,6 +307,7 @@ public abstract class GenericTeleop extends OpMode {
         // readers) immediately.
         updateActiveProfile();
         readActions();
+        updateVisionPipeline();
 
         updateShooterGoal();
         handleActions();
@@ -319,11 +322,28 @@ public abstract class GenericTeleop extends OpMode {
 
     @Override
     public void stop() {
-        if (aprilTags != null) {
+        if (vision != null) {
             try {
-                aprilTags.close();
+                vision.close();
             } catch (Exception ignored) {
             }
+        }
+    }
+
+    // ---- vision pipeline selection ----
+
+    /**
+     * One webcam, one active pipeline: while a shooting mode is on, the GOAL
+     * marker pipeline runs (the tilt estimator's only data source); the rest
+     * of the time the alliance colour pipeline runs for pollen pathing.
+     */
+    private void updateVisionPipeline() {
+        boolean shooting = actionActive[ControlAction.TOGGLE_AUTOAIM.ordinal()]
+                || actionActive[ControlAction.TOGGLE_SHOOT_ANY_DISTANCE.ordinal()];
+        OpenCVComponent.Target wanted = shooting
+                ? OpenCVComponent.Target.GOAL : getColour();
+        if (wanted != pollenLocator.getTarget()) {
+            pollenLocator.setTarget(wanted);
         }
     }
 
@@ -602,30 +622,32 @@ public abstract class GenericTeleop extends OpMode {
 
     private void reportTiltTelemetry() {
         HiveCell target = getTargetCell();
-        if (aprilTags == null) {
+        if (vision == null) {
             telemetry.addData("Goal tilt", "%s: vision unavailable", target);
             telemetry.addData("Goal isTilt", "UNKNOWN");
             panels.debug("tilt/status", target + ": vision unavailable");
             panels.debug("tilt/isTilt", "UNKNOWN");
             return;
         }
-        double pitch = aprilTags.getClusterPitch(target);
-        boolean visible = pitch != AprilTagLocalization.UNKNOWN_PITCH;
-        boolean isTilt = visible && tiltEstimator.isTilted(pitch);
+        double height = vision.getGoalHeightIn();
+        boolean visible = height != TiltEstimateComponent.UNKNOWN_HEIGHT;
+        boolean isTilt = visible && tiltEstimator.isTilted(height);
         String status = visible
-                ? String.format("%s pitch %.1f deg", target, pitch)
-                : String.format("%s not visible", target);
+                ? String.format("%s marker %.1f in up", target, height)
+                : String.format("%s not visible%s", target,
+                    pollenLocator.getTarget() != OpenCVComponent.Target.GOAL
+                            ? " (goal pipeline not active)" : "");
         String tiltStatus = !visible ? "UNKNOWN" : (isTilt ? "TILTED" : "upright");
         // Driver Station.
         telemetry.addData("Goal tilt", status);
-        telemetry.addData("Goal tilt (raw)", visible ? pitch : "UNKNOWN");
-        telemetry.addData("Goal isTilt", "%s (normal %.1f, thr %.1f)", tiltStatus,
-                tiltEstimator.getNormalPitch(), getTiltThreshold());
+        telemetry.addData("Goal tilt (raw)", visible ? height : "UNKNOWN");
+        telemetry.addData("Goal isTilt", "%s (normal %.1f in, thr %.1f in)", tiltStatus,
+                tiltEstimator.getNormalHeightIn(), getTiltThresholdIn());
         // Panels (uses debug(key, value) — same channel style as position/velocity).
         panels.debug("tilt/status", status);
         panels.debug("tilt/isTilt", tiltStatus);
         if (visible) {
-            panels.debug("tilt/pitchDeg", pitch);
+            panels.debug("tilt/heightIn", height);
         }
     }
 
@@ -718,12 +740,14 @@ public abstract class GenericTeleop extends OpMode {
     }
 
     public boolean isTilt() {
-        HiveCell target = getTargetCell();
-        if (aprilTags == null) {
-            return false; // vision failed at init — never auto-flip the goal
+        if (vision == null
+                || pollenLocator.getTarget() != OpenCVComponent.Target.GOAL) {
+            // Tilt is only measurable while the GOAL marker pipeline runs
+            // (updateVisionPipeline switches it in when a shooting mode is on).
+            return false;
         }
-        double pitch = aprilTags.getClusterPitch(target);
-        boolean visible = pitch != AprilTagLocalization.UNKNOWN_PITCH;
-        return visible && tiltEstimator.isTilted(pitch);
+        double height = vision.getGoalHeightIn();
+        boolean visible = height != TiltEstimateComponent.UNKNOWN_HEIGHT;
+        return visible && tiltEstimator.isTilted(height);
     }
 }

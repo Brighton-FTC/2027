@@ -85,8 +85,11 @@ public abstract class SamplePipeline extends OpenCvPipeline {
         }
     }
 
-    private final Scalar[] lowers;
-    private final Scalar[] uppers;
+    // HSV ranges. Subclasses may rebuild them per frame via
+    // refreshThresholds() (see GoalTiltPipeline) so dashboard edits apply
+    // without restarting the camera.
+    protected Scalar[] lowers;
+    protected Scalar[] uppers;
 
     // Reused on the camera thread only. OpenCV auto-sizes Mat outputs, so
     // these allocate once and never leak.
@@ -124,8 +127,25 @@ public abstract class SamplePipeline extends OpenCvPipeline {
     /** BGR color used to outline detected contours. */
     protected abstract Scalar contourColor();
 
+    /**
+     * Rebuild {@link #lowers}/{@link #uppers} when they come from live config.
+     * Called at the top of every frame; default does nothing (fixed ranges).
+     */
+    protected void refreshThresholds() {
+    }
+
+    /**
+     * Known real-world width (in) used for the distance math. Override when
+     * the detected element is not the standard sample ({@link GoalTiltPipeline}
+     * uses the goal-marker width).
+     */
+    protected double knownWidthIn() {
+        return RobotConfig.Vision.OPENCV_KNOWN_OBJECT_WIDTH_IN;
+    }
+
     @Override
     public Mat processFrame(Mat input) {
+        refreshThresholds();
         Imgproc.cvtColor(input, hsv, Imgproc.COLOR_RGB2HSV);
 
         int blur = Math.max(1, RobotConfig.Vision.OPENCV_BLUR_SIZE);
@@ -152,7 +172,7 @@ public abstract class SamplePipeline extends OpenCvPipeline {
         int height = input.rows();
         double focalPx = focalLengthPx(width);
         double focalYPx = verticalFocalLengthPx(width, height);
-        double knownWidthIn = RobotConfig.Vision.OPENCV_KNOWN_OBJECT_WIDTH_IN;
+        double knownWidthIn = knownWidthIn();
         double camHeightIn = RobotConfig.Vision.OPENCV_CAMERA_HEIGHT_IN;
         double camPitchDeg = RobotConfig.Vision.OPENCV_CAMERA_PITCH_DEG;
         double minArea = RobotConfig.Vision.OPENCV_MIN_AREA_PX;

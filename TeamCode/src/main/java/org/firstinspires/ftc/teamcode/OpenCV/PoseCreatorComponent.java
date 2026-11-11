@@ -1,12 +1,7 @@
 package org.firstinspires.ftc.teamcode.OpenCV;
 
-import static org.firstinspires.ftc.robotcore.external.BlocksOpModeCompanion.hardwareMap;
-import static org.firstinspires.ftc.robotcore.external.BlocksOpModeCompanion.telemetry;
-
 import com.pedropathing.math.Pose;
 import com.pedropathing.math.Vector2D;
-
-import org.firstinspires.ftc.teamcode.config.RobotConfig;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -15,13 +10,16 @@ import java.util.List;
  * Projects the OpenCV detections into field space using the robot pose the
  * component was built with.
  *
- * <p>Snapshot semantics: the constructor opens the camera, grabs whatever
- * detections the pipeline holds at that instant and freezes them against
- * {@code robotPose} — later robot motion does NOT re-project. Callers wanting
- * fresh data construct a new instance. The camera stream must have produced
- * frames before construction for any detections to exist.
+ * <p>Snapshot semantics: detections are frozen against the {@code robotPose}
+ * they were read with — later robot motion does NOT re-project. Callers
+ * wanting fresh data construct a new instance. The camera is shared
+ * (constructor-injected {@link OpenCVComponent}), so the same webcam feeds
+ * this locator AND the tilt estimator; call {@link #setTarget} to switch
+ * which pipeline is active (only one runs at a time).
  */
 public class PoseCreatorComponent {
+
+    private final OpenCVComponent camera;
 
     private final double theta;
 
@@ -33,14 +31,29 @@ public class PoseCreatorComponent {
 
     private final List<SamplePipeline.Detection> detections;
 
-    public PoseCreatorComponent(OpenCVComponent.Target target, Pose robotPose){
-        OpenCVComponent camera = new OpenCVComponent(hardwareMap, RobotConfig.Hardware.WEBCAM_NAME, telemetry, target);
+    /**
+     * Wraps the OpMode's one camera. Takes the first snapshot of the active
+     * pipeline against {@code robotPose}; the stream must have produced
+     * frames for anything to be visible.
+     */
+    public PoseCreatorComponent(OpenCVComponent camera, Pose robotPose){
+        this.camera = camera;
         this.detections = camera.getDetections();
         // Derive from the same snapshot, not a second pipeline read.
         this.best = detections.isEmpty() ? null : detections.get(0);
         this.theta = robotPose.heading();
         this.robotX = robotPose.x();
         this.robotY = robotPose.y();
+    }
+
+    /** Switches the active colour pipeline (takes effect on the next frames). */
+    public void setTarget(OpenCVComponent.Target target) {
+        camera.setTarget(target);
+    }
+
+    /** The currently active colour pipeline. */
+    public OpenCVComponent.Target getTarget() {
+        return camera.getTarget();
     }
 
     /** True when the selected ball has a usable field position. */
