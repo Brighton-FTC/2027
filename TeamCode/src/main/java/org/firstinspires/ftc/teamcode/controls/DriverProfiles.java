@@ -55,6 +55,18 @@ public final class DriverProfiles {
     public static final Binding UNIVERSAL_DRIVE_MODE = Binding.button(PSButtons.OPTIONS);
 
     /**
+     * Universal teleauton key, live on EVERY profile no matter what
+     * {@link #ACTIVE} says — press to toggle the auto-pollen-tracking drive
+     * (the robot follows collision-checked paths to the yellow pollens the
+     * webcam sees; manual drive is suspended while it runs).
+     *
+     * <p>SHARE is the one key none of the three submitted layouts claims
+     * (OPTIONS is taken by {@link #UNIVERSAL_DRIVE_MODE}), so it goes here,
+     * outside the profile maps, for the same reason drive mode does.
+     */
+    public static final Binding UNIVERSAL_TELEAUTON = Binding.button(PSButtons.SHARE);
+
+    /**
      * Driver A's layout, exactly as submitted:
      * shoot L2 (LEFT_TRIGGER), auto-aim L1 (LEFT_BUMPER),
      * shoot-any-distance R1 (RIGHT_BUMPER), ramp L3 (LEFT_STICK_BUTTON),

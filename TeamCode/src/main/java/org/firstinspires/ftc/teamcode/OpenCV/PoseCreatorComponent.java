@@ -12,35 +12,63 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * Projects the OpenCV detections into field space using the robot pose the
- * component was built with.
+ * Projects the OpenCV detections into field space using a robot pose.
  *
- * <p>Snapshot semantics: the constructor opens the camera, grabs whatever
- * detections the pipeline holds at that instant and freezes them against
- * {@code robotPose} — later robot motion does NOT re-project. Callers wanting
- * fresh data construct a new instance. The camera stream must have produced
- * frames before construction for any detections to exist.
+ * <p>Snapshot semantics: detections are frozen against the robot pose they
+ * were read with — the constructor takes the first snapshot, and
+ * {@link #refresh(Pose)} re-reads the pipeline and re-anchors the projection
+ * to a new pose (same camera, no reopen). Call {@link #startCamera()} once
+ * for any detections to exist.
  */
 public class PoseCreatorComponent {
 
-    private final double theta;
+    private final OpenCVComponent camera;
 
-    private final double robotX;
+    private double theta;
 
-    private final double robotY;
+    private double robotX;
 
-    private final SamplePipeline.Detection best;
+    private double robotY;
 
-    private final List<SamplePipeline.Detection> detections;
+    private SamplePipeline.Detection best;
+
+    private List<SamplePipeline.Detection> detections;
 
     public PoseCreatorComponent(OpenCVComponent.Target target, Pose robotPose){
-        OpenCVComponent camera = new OpenCVComponent(hardwareMap, RobotConfig.Hardware.WEBCAM_NAME, telemetry, target);
+        this.camera = new OpenCVComponent(hardwareMap, RobotConfig.Hardware.WEBCAM_NAME, telemetry, target);
         this.detections = camera.getDetections();
         // Derive from the same snapshot, not a second pipeline read.
         this.best = detections.isEmpty() ? null : detections.get(0);
         this.theta = robotPose.heading();
         this.robotX = robotPose.x();
         this.robotY = robotPose.y();
+    }
+
+    /**
+     * Re-reads the pipeline and re-anchors the projection to the given pose —
+     * the cheap way to get fresh data mid-run (no camera reopen).
+     */
+    public void refresh(Pose robotPose) {
+        this.detections = camera.getDetections();
+        this.best = detections.isEmpty() ? null : detections.get(0);
+        this.theta = robotPose.heading();
+        this.robotX = robotPose.x();
+        this.robotY = robotPose.y();
+    }
+
+    /** Opens the camera and starts streaming (idempotent). */
+    public void startCamera() {
+        camera.startStreaming();
+    }
+
+    /** Stops streaming and releases the camera device. */
+    public void closeCamera() {
+        camera.close();
+    }
+
+    /** Switches the active colour pipeline (takes effect on the next frames). */
+    public void setTarget(OpenCVComponent.Target target) {
+        camera.setTarget(target);
     }
 
     /** True when the selected ball has a usable field position. */

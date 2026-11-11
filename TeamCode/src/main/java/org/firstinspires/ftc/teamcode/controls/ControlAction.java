@@ -49,6 +49,13 @@ public enum ControlAction {
      */
     SWITCH_GOAL("Switch goal", InputStyle.TOGGLE),
 
+    /**
+     * Toggle teleauton: the robot tracks the yellow pollens with the webcam
+     * and drives to them itself (collision-checked straight lines). Driver
+     * manual drive is suspended while it is on.
+     */
+    TOGGLE_TELEAUTON("Teleauton", InputStyle.TOGGLE),
+
     /** Hold (or press-to-toggle) to drive at reduced speed. May be unbound. */
     SLOW_MODE("Slow mode", InputStyle.HOLD);
 

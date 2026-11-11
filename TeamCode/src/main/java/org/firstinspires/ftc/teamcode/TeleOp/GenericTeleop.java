@@ -1,7 +1,5 @@
 package org.firstinspires.ftc.teamcode.TeleOp;
 
-import static com.pedropathing.api.Paths.line;
-
 import com.arcrobotics.ftclib.gamepad.GamepadEx;
 import com.arcrobotics.ftclib.gamepad.TriggerReader;
 import com.bylazar.telemetry.PanelsTelemetry;
@@ -11,13 +9,13 @@ import com.pedropathing.follower.Follower;
 import com.pedropathing.follower.ManualDrive;
 import com.pedropathing.ivy.Command;
 import com.pedropathing.math.Pose;
-import com.pedropathing.math.Vector2D;
 import com.pedropathing.paths.Path;
 import com.qualcomm.robotcore.eventloop.opmode.OpMode;
 
 import org.firstinspires.ftc.teamcode.FlyWheel.DynamicAngleComponent;
 import org.firstinspires.ftc.teamcode.FlyWheel.FlyWheelMotorComponent;
 import org.firstinspires.ftc.teamcode.OpenCV.OpenCVComponent;
+import org.firstinspires.ftc.teamcode.OpenCV.PollenPaths;
 import org.firstinspires.ftc.teamcode.OpenCV.PoseCreatorComponent;
 import org.firstinspires.ftc.teamcode.Servo.ServoComponent;
 import org.firstinspires.ftc.teamcode.IntakeMotorComponent;
@@ -36,7 +34,6 @@ import org.firstinspires.ftc.teamcode.controls.DriverProfiles;
 import org.firstinspires.ftc.teamcode.pedro.Constants;
 
 import java.util.EnumMap;
-import java.util.List;
 import java.util.Map;
 
 /**
@@ -120,6 +117,8 @@ public abstract class GenericTeleop extends OpMode {
     private boolean pollenPathBlocked;
     /** Why the last pollen path attempt followed or not (telemetry). */
     private String pollenPathStatus = "never run";
+    /** Latched teleauton state — mirrors TOGGLE_TELEAUTON's actionActive. */
+    private boolean teleautonActive;
 
     /** Current goal XY/height, always read live from {@link RobotConfig} tuning. */
     protected Goal getActiveGoal() {
@@ -213,6 +212,8 @@ public abstract class GenericTeleop extends OpMode {
         turret.resetTurretEncoder();
 
         pollenLocator = new PoseCreatorComponent(getColour(), follower.pose());
+        // Stream from init so the teleauton tracker has frames by match start.
+        pollenLocator.startCamera();
     }
 
     /**
@@ -225,9 +226,9 @@ public abstract class GenericTeleop extends OpMode {
      * lies within {@link RobotConfig.Field#POLLEN_PATH_CLEARANCE_IN} of the
      * line, the path is rejected and the command ends without driving.
      *
-     * <p>{@code follower.update()} already runs in {@link #loop()}; note that
-     * driver manual input ({@link #handleDrive()}) cancels the follow — gate
-     * it when wiring this up.
+     * <p>{@code follower.update()} already runs in {@link #loop()}; while the
+     * teleauton toggle is latched, {@link #handleDrive()} stands aside so
+     * driver manual input cannot cancel the follow.
      */
     public Command pathToPollen(double x, double y, double heading) {
         return Command.build()
@@ -253,11 +254,11 @@ public abstract class GenericTeleop extends OpMode {
             pollenPathStatus = String.format("already at target (%.1f in)", travel);
             return;
         }
-        // Keep the robot's heading at t=0 (no snap) and rotate to the
-        // approach heading by the end of the line.
-        Path path = line(start.toVector2D(), end.toVector2D())
-                .linear(start.heading(), end.heading());
-        if (pollenPathCollides(start, end)) {
+        // Heading is interpolated along the line by PollenPaths.plan(); the
+        // 9in keep-out around every other detected object is checked there.
+        Path path = PollenPaths.plan(start, end, pollenLocator.getObstaclePositions(),
+                RobotConfig.Field.POLLEN_PATH_CLEARANCE_IN, MIN_POLLEN_PATH_IN);
+        if (path == null) {
             pollenPathStatus = String.format(
                     "blocked: object within %.1f in of path",
                     RobotConfig.Field.POLLEN_PATH_CLEARANCE_IN);
@@ -268,25 +269,40 @@ public abstract class GenericTeleop extends OpMode {
         follower.follow(path);
     }
 
+    // ---- teleauton (auto pollen tracking) ----
+
     /**
-     * True when any detected object other than the target sits within
-     * {@link RobotConfig.Field#POLLEN_PATH_CLEARANCE_IN} of the straight
-     * pollen path. Point-to-segment distance — exact for a Line path.
+     * Runs the teleauton system while {@code TOGGLE_TELEAUTON} is latched:
+     * whenever no path is in progress, re-reads the webcam (yellow pollen
+     * pipeline), picks the largest detection and drives a collision-checked
+     * line to it — repeating until the toggle goes off. Manual drive is
+     * suspended for the duration (see {@link #handleDrive()}).
      */
-    private boolean pollenPathCollides(Pose start, Pose end) {
-        Vector2D a = start.toVector2D();
-        Vector2D seg = end.toVector2D().minus(a);
-        double lenSq = seg.magnitudeSquared();
-        for (Vector2D obstacle : pollenLocator.getObstaclePositions()) {
-            double t = lenSq == 0.0
-                    ? 0.0 : obstacle.minus(a).dot(seg) / lenSq;
-            t = Math.max(0.0, Math.min(1.0, t));
-            if (obstacle.minus(a.plus(seg.times(t))).magnitude()
-                    < RobotConfig.Field.POLLEN_PATH_CLEARANCE_IN) {
-                return true;
-            }
+    private void handleTeleauton() {
+        boolean tracking = actionActive[ControlAction.TOGGLE_TELEAUTON.ordinal()];
+        if (tracking != teleautonActive) {
+            teleautonActive = tracking;
+            // Pollens are the yellow artifact — switch the pipeline over for
+            // the duration and restore the alliance colour afterwards.
+            pollenLocator.setTarget(tracking
+                    ? OpenCVComponent.Target.YELLOW : getColour());
         }
-        return false;
+        if (!tracking) {
+            return;
+        }
+
+        if (follower.isBusy()) {
+            return; // leg in progress — let it finish before re-acquiring
+        }
+
+        // Fresh vision, re-anchored to the pose we are actually at.
+        pollenLocator.refresh(follower.pose());
+        Pose target = pollenLocator.createPose();
+        if (target == null) {
+            pollenPathStatus = "teleauton: searching";
+            return; // nothing visible this frame — retry next tick
+        }
+        followPollenPath(target.x(), target.y(), target.heading());
     }
 
     @Override
@@ -308,6 +324,7 @@ public abstract class GenericTeleop extends OpMode {
 
         updateShooterGoal();
         handleActions();
+        handleTeleauton();
         handleDrive();
         reportActionTelemetry();
         reportTiltTelemetry();
@@ -324,6 +341,9 @@ public abstract class GenericTeleop extends OpMode {
                 aprilTags.close();
             } catch (Exception ignored) {
             }
+        }
+        if (pollenLocator != null) {
+            pollenLocator.closeCamera();
         }
     }
 
@@ -394,15 +414,22 @@ public abstract class GenericTeleop extends OpMode {
             actionPressed[action.ordinal()] = pressed;
         }
 
-        // Universal drive-mode key: polled outside the profile map so it works
-        // on every profile — including driver J's, which has no drive-mode
-        // binding at all — and alongside A's CIRCLE / Y's D-pad-right.
-        Binding universal = DriverProfiles.UNIVERSAL_DRIVE_MODE;
-        if (universal.button.isPresent()
-                && pad(universal).wasJustPressed(universal.button.get())) {
-            int driveMode = ControlAction.TOGGLE_DRIVE_MODE.ordinal();
-            actionActive[driveMode] = !actionActive[driveMode];
-            actionPressed[driveMode] = true;
+        // Universal keys: polled outside the profile map so they work on
+        // every profile — including driver J's, which has no drive-mode
+        // binding at all — and alongside the profile's own bindings.
+        pollUniversalToggle(DriverProfiles.UNIVERSAL_DRIVE_MODE,
+                ControlAction.TOGGLE_DRIVE_MODE);
+        pollUniversalToggle(DriverProfiles.UNIVERSAL_TELEAUTON,
+                ControlAction.TOGGLE_TELEAUTON);
+    }
+
+    /** One universal TOGGLE key: press flips the action's latched state. */
+    private void pollUniversalToggle(Binding binding, ControlAction action) {
+        if (binding.button.isPresent()
+                && pad(binding).wasJustPressed(binding.button.get())) {
+            int i = action.ordinal();
+            actionActive[i] = !actionActive[i];
+            actionPressed[i] = true;
         }
     }
 
@@ -513,6 +540,11 @@ public abstract class GenericTeleop extends OpMode {
                     fieldCentric = active;
                     break;
 
+                case TOGGLE_TELEAUTON:
+                    // consumed by handleTeleauton() (owns the drivetrain
+                    // while latched) and handleDrive() (stands aside)
+                    break;
+
                 case TOGGLE_INTAKE:
                 case FLUSH_STORAGE:
                     // handled above by handleFeed(), once per tick
@@ -567,6 +599,13 @@ public abstract class GenericTeleop extends OpMode {
     // ---- drive ----
 
     private void handleDrive() {
+        if (teleautonActive) {
+            // Teleauton owns the drivetrain this tick: a manual() call here
+            // would cancel the follow. Toggling teleauton off restores it.
+            telemetry.addData("Slow mode", slowActive);
+            telemetry.addData("Field centric", fieldCentric);
+            return;
+        }
         // Slow mode: re-honors the legacy RobotControls.SLOW_IS_TOGGLE toggle
         // preference even under the new profile system.
         boolean slow;
@@ -646,7 +685,10 @@ public abstract class GenericTeleop extends OpMode {
                     activeGoal, activeGoal.x(), activeGoal.y(),
                     activeGoal.height(), activeGoal.cell());
         }
+        telemetry.addData("Teleauton", teleautonActive
+                ? "TRACKING (manual suspended)" : "off (SHARE)");
         telemetry.addData("Pollen path", pollenPathStatus);
+        panels.debug("teleauton", teleautonActive);
         panels.debug("pollen/path", pollenPathStatus);
         panels.debug("position", follower.pose());
         panels.debug("velocity", follower.velocity());
