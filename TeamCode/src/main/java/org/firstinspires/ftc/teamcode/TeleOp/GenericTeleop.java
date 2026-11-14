@@ -672,6 +672,11 @@ public abstract class GenericTeleop extends OpMode {
         panels.debug("pollen/path", pollenPathStatus);
         panels.debug("position", follower.pose());
         panels.debug("velocity", follower.velocity());
+        if (vision != null) {
+            vision.reportTelemetry();
+            panels.debug("vision/camera", vision.getCameraStatus());
+            panels.debug("vision/fps", vision.getFps());
+        }
     }
 
     /** Status of every bound action this tick (unbound actions are skipped). */

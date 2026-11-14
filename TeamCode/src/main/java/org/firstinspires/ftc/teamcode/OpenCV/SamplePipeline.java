@@ -247,10 +247,20 @@ public abstract class SamplePipeline extends OpenCvPipeline {
     }
 
     /**
-     * Pinhole focal length (px) from frame width and configured HFOV.
-     * Falls back to width/2 when HFOV is not configured.
+     * Pinhole focal length (px). A measured {@link
+     * RobotConfig.Vision#OPENCV_FOCAL_PX} wins (scaled to the live frame
+     * width); otherwise it is derived from {@link
+     * RobotConfig.Vision#OPENCV_HFOV_DEG}. Falls back to width/2 when neither
+     * is usable, so the stream always produces numbers.
      */
     public static double focalLengthPx(int frameWidthPx) {
+        double calibrated = RobotConfig.Vision.OPENCV_FOCAL_PX;
+        if (calibrated > 0 && frameWidthPx > 0) {
+            int referenceWidth = RobotConfig.Vision.CAMERA_WIDTH;
+            return referenceWidth > 0
+                    ? calibrated * frameWidthPx / referenceWidth
+                    : calibrated;
+        }
         double hfov = RobotConfig.Vision.OPENCV_HFOV_DEG;
         if (hfov <= 0 || hfov >= 180) {
             return Math.max(1.0, frameWidthPx / 2.0);
@@ -259,12 +269,16 @@ public abstract class SamplePipeline extends OpenCvPipeline {
     }
 
     /**
-     * Vertical focal length (px), derived from HFOV and the frame aspect
-     * ratio — no extra calibration needed.
+     * Vertical focal length (px). For square pixels this equals the
+     * horizontal focal length; derived the same way so a calibrated value
+     * flows through to elevation/height math.
      */
     public static double verticalFocalLengthPx(int frameWidthPx, int frameHeightPx) {
+        if (RobotConfig.Vision.OPENCV_FOCAL_PX > 0 || frameWidthPx <= 0) {
+            return focalLengthPx(frameWidthPx);
+        }
         double hfov = RobotConfig.Vision.OPENCV_HFOV_DEG;
-        if (hfov <= 0 || hfov >= 180 || frameWidthPx <= 0 || frameHeightPx <= 0) {
+        if (hfov <= 0 || hfov >= 180 || frameHeightPx <= 0) {
             return Math.max(1.0, frameHeightPx / 2.0);
         }
         double vfovRad = 2.0 * Math.atan(

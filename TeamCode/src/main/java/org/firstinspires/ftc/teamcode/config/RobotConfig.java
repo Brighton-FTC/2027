@@ -298,9 +298,64 @@ public final class RobotConfig {
     public static final class Vision {
         private Vision() {}
 
+        // ---- camera stream (works on any UVC webcam; no model sheet needed) ----
+
+        /** Requested stream size. 640x480 is supported by every FTC-legal webcam. */
         public static int CAMERA_WIDTH = 640;
         public static int CAMERA_HEIGHT = 480;
+        /** Driver-station preview. Turn off on a slow hub to save CPU. */
         public static boolean ENABLE_LIVE_VIEW = true;
+        /** Show EasyOpenCV's FPS overlay on the preview. */
+        public static boolean SHOW_FPS_OVERLAY = false;
+        /**
+         * When the configured {@link Hardware#WEBCAM_NAME} is missing or
+         * unplugged, pick the first attached webcam instead of crashing init.
+         * Turn off to make a missing camera a hard error again.
+         */
+        public static boolean AUTO_DETECT_CAMERA = true;
+        /** How the camera is physically mounted. */
+        public static CameraRotation CAMERA_ROTATION = CameraRotation.UPRIGHT;
+        /** YUY2 = raw, no compression artifacts (default, safest). MJPEG = higher fps at high res. */
+        public static StreamFormat CAMERA_STREAM_FORMAT = StreamFormat.YUY2;
+
+        /**
+         * AUTO keeps the webcam's own exposure loop (best first-test default).
+         * MANUAL locks brightness so colour thresholds do not drift under
+         * changing arena light — usually the right choice once HSV is tuned.
+         */
+        public static ExposureMode CAMERA_EXPOSURE_MODE = ExposureMode.AUTO;
+        /** Exposure time used only in MANUAL mode (clamped to the camera's range). */
+        public static int CAMERA_EXPOSURE_MS = 8;
+        /** Manual gain (camera units, typically 0-255). 0 = leave untouched. */
+        public static int CAMERA_GAIN = 0;
+        /** Lock white balance so red/blue do not shift with lighting. */
+        public static boolean CAMERA_LOCK_WHITE_BALANCE = false;
+        /** White-balance temperature in Kelvin, used when locking. */
+        public static int CAMERA_WHITE_BALANCE_K = 4600;
+
+        /** Physical mounting of the webcam. */
+        public enum CameraRotation {
+            /** Lens upright, long edge horizontal (normal FTC mount). */
+            UPRIGHT,
+            /** Camera rotated 90 deg counter-clockwise. */
+            SIDEWAYS_LEFT,
+            /** Camera rotated 90 deg clockwise. */
+            SIDEWAYS_RIGHT,
+            /** Camera mounted upside down. */
+            UPSIDE_DOWN
+        }
+
+        /** EasyOpenCV stream format. */
+        public enum StreamFormat {
+            YUY2,
+            MJPEG
+        }
+
+        /** Webcam exposure behaviour. */
+        public enum ExposureMode {
+            AUTO,
+            MANUAL
+        }
 
         /** Per-alliance tilt targets. The OpMode subclass picks which one to use. */
         public static HiveCell RED_TARGET_CELL = HiveCell.RED_SCORING;
@@ -328,8 +383,21 @@ public final class RobotConfig {
         public static double OPENCV_CENTER_TOLERANCE_PX = 60.0;
         /** EasyOpenCV Gaussian blur kernel (must stay odd). */
         public static int OPENCV_BLUR_SIZE = 5;
-        /** EasyOpenCV camera horizontal field of view (deg). Calibrate per webcam. */
+        /**
+         * Camera horizontal field of view (deg). Only used when
+         * {@link #OPENCV_FOCAL_PX} is 0. 60 deg is a safe generic webcam
+         * value; set it exactly if you know the model (C270 ~ 60 deg
+         * diagonal is NOT 60 deg horizontal — measure or use focal px).
+         */
         public static double OPENCV_HFOV_DEG = 60.0;
+        /**
+         * Measured horizontal focal length in pixels at {@link #CAMERA_WIDTH}.
+         * 0 = derive it from {@link #OPENCV_HFOV_DEG}. To calibrate: put an
+         * object of known width W (in) at D (in), read its box width B (px),
+         * then set this to D * B / W. This bypasses the camera spec sheet
+         * entirely and makes both bearing and distance exact.
+         */
+        public static double OPENCV_FOCAL_PX = 0.0;
         /** EasyOpenCV known object width (in) for distance math. Measure your game element. */
         public static double OPENCV_KNOWN_OBJECT_WIDTH_IN = 3.5;
         /** EasyOpenCV camera height above the ground (in). Measure your mount. */
