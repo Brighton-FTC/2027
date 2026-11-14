@@ -14,11 +14,8 @@ import java.util.Objects;
  * Turret yaw controlled by a PIDF loop on encoder ticks.
  *
  * <p>Angles are in degrees, relative to the robot forward (0 = straight
- * ahead, + = left). Turn commands are NOT end-stop clamped: the wrap-around
- * logic keeps the accumulated rotation within +/- 180 deg, and when a
- * command would push the turret past that seam the command is shunted by
- * +/- 360 deg so the turret turns the other way around to the equivalent
- * angle instead of stopping at a maximum angle.
+ * ahead, + = left). Commands are software-clamped to
+ * {@code +/- MAX_ANGLE_DEG} so the turret can never wrap cables.
  *
  * <p>Gains and limits live in {@link RobotConfig.Turret} and are re-applied
  * on every update, so dashboard edits take effect immediately.
@@ -88,23 +85,19 @@ public class TurretPIDComponent {
     }
 
     /**
-     * Rotates the turret by a relative offset in degrees using the
-     * wrap-around turning logic: the command is shunted by +/- 360 deg when
-     * it would push the accumulated rotation past +/- 180 deg, so the turret
-     * turns the other way around instead of stopping at an end-stop.
+     * Rotates the turret by a relative offset in degrees.
+     * The resulting absolute target is clamped to the software end-stops.
      */
     public void turnTurretBy(double deltaDegrees) {
         applyGains();
-        trackRotation();
-        double toTurn = wrapTurn(deltaDegrees);
-        driveToAngle(getCurrentAngle() + toTurn);
+        double targetAngle = clampAngle(getCurrentAngle() + deltaDegrees);
+        driveToAngle(targetAngle);
     }
 
     /**
      * Aims at the goal from the given robot pose (inches + heading radians,
-     * field frame). When the goal crosses the +/- 180 deg seam the turret
-     * turns the other way around to the equivalent angle instead of stopping
-     * at a maximum angle.
+     * field frame). If the goal is behind the robot the turret holds at the
+     * nearest end-stop instead of spinning around.
      */
     public void aimToObject(double robotX, double robotY, double robotHeadingRad) {
         if (isUnknownPose(robotX, robotY)) {
@@ -114,12 +107,12 @@ public class TurretPIDComponent {
         double goalBearing = Math.toDegrees(Math.atan2(goalY - robotY, goalX - robotX));
 
         double relative = normalize180(goalBearing - robotDeg);
-        double toTurn = relative - getCurrentAngle();
+        double clampedTarget = clampAngle(relative);
+        double toTurn = clampedTarget - getCurrentAngle();
 
         telemetry.addData("Turret/toTurnDeg", toTurn);
         telemetry.addData("Turret/relativeDeg", relative);
-        telemetry.addData("Turret/globalAngleDeg", turretGlobalAngle);
-        telemetry.addData("Turret/targetDeg", getCurrentAngle() + toTurn);
+        telemetry.addData("Turret/targetDeg", clampedTarget);
         telemetry.addData("Turret/currentDeg", getCurrentAngle());
         telemetry.addData("Turret/errorTicks", controller.getPositionError());
 
@@ -134,12 +127,23 @@ public class TurretPIDComponent {
         double robotDeg = Math.toDegrees(robotHeadingRad);
         double goalBearing = Math.toDegrees(Math.atan2(goalY - robotY, goalX - robotX));
         double relative = normalize180(goalBearing - robotDeg);
-        double toTurn = wrapTurn(relative - getCurrentAngle());
-        return Math.abs(toTurn) <= RobotConfig.Turret.AIM_TOLERANCE_DEG;
+        double clampedTarget = clampAngle(relative);
+        return Math.abs(clampedTarget - getCurrentAngle()) <= RobotConfig.Turret.AIM_TOLERANCE_DEG;
     }
 
     public double getPIDSetPoint() {
         return controller.getSetPoint();
+    }
+
+    /** Retargets the turret to a new HIVE CELL (reads dashboard-tuned XY). */
+    public void setGoal(RobotConfig.Field.Goal goal) {
+        setGoal(goal.x(), goal.y());
+    }
+
+    /** Retargets the turret to an explicit field goal, in inches. */
+    public void setGoal(double goalX, double goalY) {
+        this.goalX = goalX;
+        this.goalY = goalY;
     }
 
     // ---- internals ----
@@ -160,30 +164,9 @@ public class TurretPIDComponent {
                 RobotConfig.Turret.KF);
     }
 
-    /**
-     * Updates the accumulated rotation tracking (~turretGlobalAngle in the
-     * reference implementation): the unwrapped total rotation since power-on,
-     * built from per-sample encoder deltas.
-     */
-    private void trackRotation() {
-        double turretAngle = getCurrentAngle();
-        turretGlobalAngle += turretAngle - lastTurretAngle;
-        lastTurretAngle = turretAngle;
-    }
-
-    /**
-     * Wrap-around turn logic (mirrors the reference implementation):
-     * if the command would push the accumulated rotation past +/- 180 deg,
-     * shunt it by 360 deg so the turret turns the other way around to the
-     * equivalent angle instead of stopping at the maximum angle.
-     */
-    private double wrapTurn(double toTurnDeg) {
-        if (Math.abs(turretGlobalAngle + toTurnDeg) >= 180 && toTurnDeg > 0) {
-            toTurnDeg -= 360;
-        } else if (Math.abs(turretGlobalAngle + toTurnDeg) >= 180 && toTurnDeg < 0) {
-            toTurnDeg += 360;
-        }
-        return toTurnDeg;
+    private static double clampAngle(double angleDeg) {
+        double limit = Math.abs(RobotConfig.Turret.MAX_ANGLE_DEG);
+        return Math.max(-limit, Math.min(limit, angleDeg));
     }
 
     private static double clampPower(double power) {
@@ -204,14 +187,5 @@ public class TurretPIDComponent {
     private static boolean isUnknownPose(double x, double y) {
         double sentinel = RobotConfig.Launcher.UNKNOWN_POSE;
         return x == sentinel || y == sentinel;
-    }
-
-    public void setGoal(RobotConfig.Field.Goal goal) {
-        setGoal(goal.x(), goal.y());
-    }
-
-    public void setGoal(double goalX, double goalY) {
-        this.goalX = goalX;
-        this.goalY = goalY;
     }
 }

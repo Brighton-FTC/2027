@@ -7,34 +7,37 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * Projects the OpenCV detections into field space using the robot pose the
- * component was built with.
+ * Projects the OpenCV detections into field space using a robot pose.
  *
- * <p>Snapshot semantics: detections are frozen against the {@code robotPose}
- * they were read with — later robot motion does NOT re-project. Callers
- * wanting fresh data construct a new instance. The camera is shared
- * (constructor-injected {@link OpenCVComponent}), so the same webcam feeds
- * this locator AND the tilt estimator; call {@link #setTarget} to switch
- * which pipeline is active (only one runs at a time).
+ * <p>Snapshot semantics: detections are frozen against the robot pose they
+ * were read with — the constructor takes the first snapshot, and
+ * {@link #refresh(Pose)} re-reads the pipeline and re-anchors the projection
+ * to a new pose (same camera, no reopen).
+ *
+ * <p>The camera is constructor-injected and shared: the same webcam feeds
+ * this locator AND the TeleOp's tilt estimator, so callers that do NOT own
+ * the camera must not call {@link #closeCamera()}. Call {@link #setTarget}
+ * to switch which pipeline is active (only one runs at a time).
  */
 public class PoseCreatorComponent {
 
     private final OpenCVComponent camera;
 
-    private final double theta;
+    private double theta;
 
-    private final double robotX;
+    private double robotX;
 
-    private final double robotY;
+    private double robotY;
 
-    private final SamplePipeline.Detection best;
+    private SamplePipeline.Detection best;
 
-    private final List<SamplePipeline.Detection> detections;
+    private List<SamplePipeline.Detection> detections;
 
     /**
-     * Wraps the OpMode's one camera. Takes the first snapshot of the active
+     * Wraps an already-created camera. Takes the first snapshot of the active
      * pipeline against {@code robotPose}; the stream must have produced
-     * frames for anything to be visible.
+     * frames for anything to be visible ({@link #startCamera()} if the caller
+     * owns the camera and has not started it yet).
      */
     public PoseCreatorComponent(OpenCVComponent camera, Pose robotPose){
         this.camera = camera;
@@ -44,6 +47,32 @@ public class PoseCreatorComponent {
         this.theta = robotPose.heading();
         this.robotX = robotPose.x();
         this.robotY = robotPose.y();
+    }
+
+    /**
+     * Re-reads the pipeline and re-anchors the projection to the given pose —
+     * the cheap way to get fresh data mid-run (no camera reopen).
+     */
+    public void refresh(Pose robotPose) {
+        this.detections = camera.getDetections();
+        this.best = detections.isEmpty() ? null : detections.get(0);
+        this.theta = robotPose.heading();
+        this.robotX = robotPose.x();
+        this.robotY = robotPose.y();
+    }
+
+    /** Opens the camera and starts streaming (idempotent). */
+    public void startCamera() {
+        camera.startStreaming();
+    }
+
+    /**
+     * Stops streaming and releases the camera device. Only call this when
+     * this locator owns the camera (e.g. the pollen autonomous); a shared
+     * camera is closed by its owner.
+     */
+    public void closeCamera() {
+        camera.close();
     }
 
     /** Switches the active colour pipeline (takes effect on the next frames). */
